@@ -1,8 +1,8 @@
 const CACHE = 'french-flashcards-shell-__BUILD_REVISION__';
-const SHELL = ['./', './index.html', './app.js', './icon.png', './manifest.webmanifest'];
+const SHELL = ['./', './index.html', './__APP_SCRIPT__', './icon.png', './manifest.webmanifest'];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL.map(url => new Request(url, { cache: 'reload' })))));
   // A replacement waits for the old app's windows to close, preserving active rounds.
 });
 
