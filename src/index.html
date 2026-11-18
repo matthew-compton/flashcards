@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#5b43ab">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.png" type="image/png">
+<link rel="apple-touch-icon" href="./icon.png">
+<title>Flashcards</title>
+<style>
+:root {
+  font: 16px/1.5 "Segoe UI", system-ui, sans-serif;
+  color: #24213b;
+  background: #f7f6fb;
+  --muted: #625d77;
+  --line: #e4dfed;
+  --accent: #5b43ab;
+  --tint: #eee9fa;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .48; }
+button:focus-visible, input:focus-visible { outline: 3px solid #8b70d7; outline-offset: 3px; }
+[hidden] { display: none !important; }
+header { background: white; border-bottom: 1px solid var(--line); }
+.header-inner, .layout { width: min(1120px, calc(100% - 64px)); margin: auto; }
+.header-inner { min-height: 74px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.sync-status { font-size: .75rem; color: var(--muted); }
+.auth-panel { width: min(460px, calc(100% - 32px)); margin: 64px auto; }
+.auth-panel p { margin: 12px 0 20px; color: var(--muted); }
+.auth-panel input { width: 100%; }
+.account-controls { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.brand { display: flex; align-items: center; gap: 12px; font-weight: 700; }
+.brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--accent); color: white; font: bold 23px Georgia, serif; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.button { background: white; border: 1px solid var(--line); border-radius: 9px; color: inherit; padding: 8px 13px; font-weight: 600; font-size: .875rem; }
+.button:hover:not(:disabled) { border-color: #a99ac9; }
+.primary { background: var(--accent); border-color: var(--accent); color: white; }
+.primary:hover:not(:disabled) { background: #4c368f; }
+.layout { display: grid; grid-template-columns: 244px minmax(0,1fr); gap: 56px; padding: 48px 0; }
+aside { min-width: 0; }
+.sidebar-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 24px; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: clamp(1.9rem, 5vw, 2.75rem); letter-spacing: -.045em; line-height: 1.15; overflow-wrap: anywhere; }
+h2 { font-size: 1.2rem; }
+h3 { font-size: .9rem; overflow-wrap: anywhere; }
+.mix-entry { width: 100%; margin-bottom: 12px; text-align: left; background: var(--tint); }
+.mix-entry[aria-current="true"] { border-color: var(--accent); color: #4c358e; }
+.category + .category { margin-top: 12px; }
+.category-heading { display: flex; align-items: center; gap: 10px; list-style: none; padding: 10px 11px; border-radius: 9px; background: var(--tint); cursor: pointer; }
+.category-heading::-webkit-details-marker { display: none; }
+.category-heading::before { content: ""; width: 7px; height: 7px; flex-shrink: 0; border-right: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(-45deg); }
+.category[open] > .category-heading::before { transform: translateY(-2px) rotate(45deg); }
+.category[open] > .category-heading { margin-bottom: 5px; }
+.category-heading:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.category-heading h3 { font-size: 1.18rem; font-weight: 750; }
+.category-rate { margin-left: auto; color: var(--muted); font-size: .78rem; white-space: nowrap; }
+.deck { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; padding: 10px 11px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: inherit; }
+.deck:hover { background: #f0edf6; }
+.deck[aria-current="true"] { background: var(--tint); border-color: #e1d8f5; color: #4c358e; }
+.deck.has-due { background: #fff3d8; }
+.deck.has-due:hover { background: #ffebbf; }
+.due-count { width: fit-content; padding: 1px 6px; border-radius: 6px; background: #f9e3ae; color: #6d440c; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.deck .due-count { display: block; margin-top: 4px; }
+.deck-name { overflow-wrap: anywhere; font-size: .92rem; font-weight: 650; }
+.deck-details { display: block; font-size: .75rem; color: var(--muted); }
+.deck-rate { font-size: .81rem; font-weight: 700; }
+.deck-score { display: grid; justify-items: end; flex-shrink: 0; white-space: nowrap; }
+.checked-date { color: var(--muted); font-size: .75rem; }
+.stat .checked-date { display: block; }
+.study-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+.eyebrow { font-size: .8rem; font-weight: 650; color: var(--accent); margin-bottom: 6px; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-bottom: 24px; }
+.stat { background: white; border: 1px solid var(--line); border-radius: 12px; padding: 13px 16px; }
+.stat strong { display: block; font-size: 1.3rem; }
+.stat span, .stat small { font-size: .8rem; color: var(--muted); }
+.deck-session-scores { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 6px 0 0; }
+.deck-session-scores dd { margin: 0; }
+.deck-session-scores dt { color: var(--muted); font-size: .8rem; }
+.history-directions { gap: 6px; margin: 12px 0; }
+.history-directions [aria-pressed="true"] { background: var(--tint); border-color: var(--accent); color: var(--accent); }
+.progress { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: .8rem; color: var(--muted); }
+.card-source { margin-bottom: 8px; }
+progress { width: 100%; height: 6px; display: block; margin-bottom: 15px; accent-color: var(--accent); }
+.card { width: 100%; min-height: 274px; display: grid; grid-template-rows: 1fr auto 1fr; justify-items: center; align-items: center; padding: 24px; border: 1px solid #ded4f0; border-radius: 20px; background: #f0eafa; color: #28203c; box-shadow: 0 4px 0 #e6def0; }
+.card:hover { border-color: #b9a7dd; }
+.card.revealed { background: #fff; }
+.card-language { align-self: start; color: var(--accent); font-size: .79rem; font-weight: 650; }
+.term { font: 400 clamp(2rem, 5vw, 3.75rem)/1.12 Georgia, serif; overflow-wrap: anywhere; max-width: 100%; }
+.flip-hint { align-self: end; color: var(--muted); font-size: .83rem; }
+.grades { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+.undo-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.undo-actions #flag-card { margin-right: auto; }
+.flagged { color: #805409; border-color: #d8b55c; background: #fff3d8; }
+.flag-item { border-top: 1px solid var(--line); padding: 14px 0; }
+.flag-item p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 10px; }
+.flag-item dt { font-size: .8rem; color: var(--muted); }
+.flag-item dd { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.flag-item dl { margin: 8px 0; }
+.flag-filter { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+.field select, .field textarea { width: 100%; padding: 8px 10px; color: inherit; background: white; border: 1px solid #cbc2d9; border-radius: 8px; }
+.field textarea { min-height: 84px; resize: vertical; }
+.grade { border: 1px solid; border-radius: 11px; min-height: 49px; padding: 8px; font-weight: 700; }
+.grade kbd { font: inherit; margin-inline-start: .35em; }
+.incorrect { color: #8f3039; background: #fce9eb; border-color: #efc9ce; }
+.correct { color: #1f6249; background: #e2f4eb; border-color: #b9e1cf; }
+.incorrect:hover:not(:disabled) { background: #fadade; }
+.correct:hover:not(:disabled) { background: #d1efdf; }
+.panel { text-align: center; border: 1px solid var(--line); border-radius: 16px; padding: 42px 20px; background: white; }
+.panel p { margin: 8px 0 20px; }
+.notice { color: #8f3039; margin-top: 14px; font-size: .9rem; }
+dialog { width: min(520px, calc(100% - 30px)); max-height: 85vh; border: 1px solid var(--line); border-radius: 16px; padding: 24px; color: inherit; }
+dialog::backdrop { background: #241a3e65; }
+.editor-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 16px; }
+.score-trend { background: #f7f5fc; border: 1px solid var(--line); border-radius: 12px; margin: 12px 0 16px; padding: 12px; }
+.score-trend h3 { font-size: 1rem; }
+.trend-summary { color: var(--muted); font-size: .875rem; margin-top: 2px; }
+.trend-plot { display: block; width: 100%; margin-top: 8px; overflow: visible; }
+.trend-plot text { fill: var(--muted); font-size: 16px; }
+.trend-grid { stroke: var(--line); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.trend-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.trend-point { fill: var(--accent); stroke: white; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.trend-dates { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; color: var(--muted); font-size: .75rem; }
+.session-list { margin: 12px 0 0; padding: 0; list-style: none; }
+.session-list li { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; border-top: 1px solid var(--line); padding: 10px 0; }
+.session-list small { display: block; color: var(--muted); }
+form { display: grid; gap: 12px; }
+.field { display: grid; gap: 4px; font-size: .875rem; font-weight: 600; min-width: 0; }
+.field input { width: 100%; padding: 8px 10px; color: inherit; border: 1px solid #cbc2d9; border-radius: 8px; }
+.mix-options { display: grid; gap: 6px; margin: 0; padding: 8px 12px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.mix-options legend { padding: 0 4px; font-weight: 600; }
+.mix-options-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 8px; }
+.mix-options label { display: flex; align-items: baseline; gap: 8px; cursor: pointer; }
+.mix-options label { overflow-wrap: anywhere; }
+.mix-options input { accent-color: var(--accent); }
+.mix-footer { justify-content: space-between; }
+.mix-status { font-size: .875rem; }
+.card-edit { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; margin-bottom: 10px; }
+.remove { color: #8f3039; }
+.editor-actions { justify-content: space-between; margin-top: 7px; }
+@media (max-width: 760px) {
+  .header-inner, .layout { width: calc(100% - 32px); }
+  .layout { grid-template-columns: 1fr; gap: 24px; padding: 24px 0; }
+  aside { order: 1; border-top: 1px solid var(--line); padding-top: 18px; }
+  .sidebar-heading { margin-bottom: 12px; }
+  .card { min-height: 220px; }
+}
+@media (max-width: 420px) {
+  .header-inner { min-height: 68px; }
+  .brand { font-size: .86rem; gap: 7px; }
+  .brand-mark { width: 28px; height: 28px; font-size: 18px; }
+  .button { padding: 7px 9px; }
+}
+.card.long-card .term { font-size: clamp(1.15rem, 3.4vw, 1.9rem); line-height: 1.4; }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">F</span> Flashcards</div>
+    <div class="actions">
+      <span id="sync-status" class="sync-status" role="status"></span>
+      <button id="sync-now" class="button" type="button" hidden>Sync now</button>
+      <button id="sign-out" class="button" type="button" hidden>Sign out</button>
+      <button id="export" class="button">Export backup</button>
+      <button id="import" class="button">Import</button>
+      <input id="backup-file" type="file" accept=".json,application/json" hidden>
+    </div>
+  </div>
+</header>
+<section id="auth-panel" class="panel auth-panel">
+  <h1>Your flashcards</h1>
+  <p>Sign in to open your private decks and keep your progress together across devices.</p>
+  <form id="auth-form">
+    <label class="field">Email<input id="auth-email" type="email" autocomplete="email" required></label>
+    <button id="send-signin" class="button primary" type="submit">Email me a sign-in link</button>
+  </form>
+  <p id="auth-message" role="status"></p>
+</section>
+<div id="study-app" class="layout" hidden>
+  <aside aria-label="Deck library">
+    <div class="sidebar-heading">
+      <h2>My decks</h2>
+      <button id="new-deck" class="button">+ New deck</button>
+    </div>
+    <nav aria-label="Study navigation">
+      <button id="open-mix" class="button mix-entry" type="button">Interleave your decks</button>
+      <button id="open-flags" class="button mix-entry" type="button">Flagged cards</button>
+      <div id="library"></div>
+    </nav>
+  </aside>
+  <main>
+    <div class="study-header">
+      <div><p id="category-name" class="eyebrow"></p><h1 id="deck-title"></h1></div>
+      <div class="actions" id="study-actions">
+        <button class="button" id="direction" title="Change the language order for vocabulary and examples">French → English</button>
+        <button class="button" id="shuffle">Shuffle</button>
+        <button class="button" id="open-history" type="button">Session history</button>
+        <button class="button" id="edit-deck">Edit deck</button>
+      </div>
+    </div>
+    <div id="stats" class="stats">
+      <div class="stat"><span>Latest deck scores</span><dl id="deck-session-scores" class="deck-session-scores"></dl><small id="deck-checked" class="checked-date" hidden></small></div>
+      <div class="stat"><span>Category success rate</span><strong id="category-rate"></strong><small id="category-attempts"></small></div>
+    </div>
+    <section id="review" aria-label="Study cards">
+      <p id="card-source" class="eyebrow card-source" hidden></p>
+      <div class="progress"><span id="position"></span><span id="round-score"></span></div>
+      <progress id="progress" aria-label="Cards graded this round"></progress>
+      <button id="card" class="card" type="button">
+        <span id="card-language" class="card-language"></span>
+        <span id="term" class="term"></span>
+        <span class="flip-hint">Click or press Space to flip</span>
+      </button>
+      <div class="grades">
+        <button id="incorrect" class="grade incorrect" title="Shortcuts: A, Left Arrow, or 1" aria-keyshortcuts="A ArrowLeft 1">✕ &nbsp; Incorrect <kbd aria-hidden="true">← / A</kbd></button>
+        <button id="correct" class="grade correct" title="Shortcuts: D, Right Arrow, or 2" aria-keyshortcuts="D ArrowRight 2">✓ &nbsp; Correct <kbd aria-hidden="true">→ / D</kbd></button>
+      </div>
+    </section>
+    <section id="message" class="panel" hidden>
+      <h2 id="message-title"></h2>
+      <p id="message-detail" class="muted"></p>
+      <button id="message-action" class="button primary"></button>
+    </section>
+    <div id="undo-actions" class="undo-actions" hidden>
+      <button id="flag-card" class="button" type="button" aria-keyshortcuts="F">Flag card (F)</button>
+      <button id="skip" class="button" type="button" title="Move this card to the end of the round" aria-keyshortcuts="S">Skip <span aria-hidden="true">(S)</span></button>
+      <button id="undo" class="button" type="button" title="Undo the last grade" disabled><span aria-hidden="true">↶</span> Undo</button>
+    </div>
+    <p id="notice" class="notice" role="status" hidden></p>
+  </main>
+</div>
+<dialog id="flag-dialog" aria-labelledby="flag-title">
+  <div class="editor-heading"><h2 id="flag-title">Flag card</h2><button id="close-flag" class="button" type="button">Close</button></div>
+  <form id="flag-form">
+    <label class="field">Reason<select id="flag-reason">
+      <option value="context">Needs context</option>
+      <option value="wording">Unclear wording</option>
+      <option value="error">Possible error</option>
+    </select></label>
+    <label class="field">Note (optional)<textarea id="flag-note" maxlength="2000"></textarea></label>
+    <button class="button primary" type="submit">Save flag</button>
+    <p id="flag-error" class="notice" role="status" hidden></p>
+  </form>
+</dialog>
+<dialog id="flags-dialog" aria-labelledby="flags-title">
+  <div class="editor-heading"><h2 id="flags-title">Flagged cards</h2><button id="close-flags" class="button" type="button">Close</button></div>
+  <label class="flag-filter"><input id="include-resolved" type="checkbox"> Show resolved flags</label>
+  <p id="flags-empty" class="muted">No cards flagged for review.</p>
+  <div id="flags-list"></div>
+  <p id="flags-error" class="notice" role="status" hidden></p>
+</dialog>
+<dialog id="fix-dialog" aria-labelledby="fix-title">
+  <div class="editor-heading"><h2 id="fix-title">Improve card</h2><button id="close-fix" class="button" type="button">Close</button></div>
+  <form id="fix-form">
+    <label id="fix-front-label" class="field">French<textarea id="fix-front" maxlength="500" required></textarea></label>
+    <label id="fix-back-label" class="field">English<textarea id="fix-back" maxlength="500" required></textarea></label>
+    <label class="flag-filter"><input id="fix-reset" type="checkbox" checked> Restart this card’s review schedule</label>
+    <button class="button primary" type="submit">Save and resolve flag</button>
+    <p id="fix-error" class="notice" role="status" hidden></p>
+  </form>
+</dialog>
+<dialog id="mix-dialog" aria-labelledby="mix-title">
+  <div class="editor-heading"><h2 id="mix-title">Interleave your decks</h2><button id="close-mix" class="button" type="button">Close</button></div>
+  <form id="mix-form">
+    <fieldset class="mix-options">
+      <legend>Cards to study</legend>
+      <label><input type="radio" name="mix-mode" value="due" checked> Review due cards</label>
+      <label><input type="radio" name="mix-mode" value="missed"> Missed cards</label>
+      <label><input type="radio" name="mix-mode" value="shuffle"> Shuffle selected decks</label>
+    </fieldset>
+    <fieldset class="mix-options">
+      <legend>Language direction</legend>
+      <label><input type="radio" name="mix-direction" value="fr" checked> Recognition · Front → Back</label>
+      <label><input type="radio" name="mix-direction" value="en"> Recall · Back → Front</label>
+    </fieldset>
+    <fieldset class="mix-options">
+      <legend>Sections</legend>
+      <div id="mix-sections" class="mix-options-list"></div>
+    </fieldset>
+    <div class="actions mix-footer">
+      <p id="mix-status" class="muted mix-status" role="status"></p>
+      <button id="start-mix" class="button primary" type="submit">Start review</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="history-dialog" aria-labelledby="history-title">
+  <div class="editor-heading"><h2 id="history-title">Session history</h2><button id="close-history" class="button" type="button">Close</button></div>
+  <p id="history-deck" class="eyebrow"></p>
+  <div id="history-directions" class="actions history-directions" role="group" aria-label="Score to show"></div>
+  <p id="history-empty" class="muted">No sessions recorded yet.</p>
+  <figure id="history-trend" class="score-trend" aria-labelledby="trend-title" hidden>
+    <h3 id="trend-title">Score over time</h3>
+    <p id="trend-summary" class="trend-summary"></p>
+    <svg class="trend-plot" viewBox="0 0 480 154" aria-hidden="true">
+      <text x="0" y="18">100%</text>
+      <text x="9" y="80">50%</text>
+      <text x="17" y="142">0%</text>
+      <path class="trend-grid" d="M52 13H470 M52 75H470 M52 137H470" fill="none"></path>
+      <g id="trend-points"></g>
+    </svg>
+    <figcaption class="trend-dates"><span id="trend-first"></span><span id="trend-last" hidden></span></figcaption>
+  </figure>
+  <ol id="history-list" class="session-list"></ol>
+</dialog>
+<dialog id="editor" aria-labelledby="editor-title">
+  <div class="editor-heading"><h2 id="editor-title"></h2><button id="close-editor" class="button" type="button">Close</button></div>
+  <form id="deck-form">
+    <label class="field">Deck name<input id="deck-input" maxlength="80" required></label>
+    <label class="field">Category<input id="category-input" list="category-options" maxlength="80" required></label>
+    <label class="field">Front language<input id="front-language" list="language-options" value="fr" maxlength="35" required></label>
+    <label class="field">Back language<input id="back-language" list="language-options" value="en" maxlength="35" required></label>
+    <datalist id="language-options">
+      <option value="fr">French</option><option value="en">English</option><option value="de">German</option>
+      <option value="es">Spanish</option><option value="it">Italian</option><option value="pt">Portuguese</option>
+      <option value="nl">Dutch</option><option value="ja">Japanese</option>
+    </datalist>
+    <datalist id="category-options"></datalist>
+    <div id="card-fields"></div>
+    <div class="actions editor-actions">
+      <button id="add-card" type="button" class="button">+ Add card</button>
+      <button class="button primary" type="submit">Save deck</button>
+    </div>
+    <p id="editor-error" class="notice" role="status" hidden></p>
+  </form>
+</dialog>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
+
