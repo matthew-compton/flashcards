@@ -106,13 +106,13 @@ export class StudyStore extends EventTarget {
     if (operations.length) await this.commit(operations);
   }
 
-  async importLibrary(input) {
+  async importLibrary(input, { sourceHash } = {}) {
     const library = prepareLibrary(input);
     const id = crypto.randomUUID();
     const now = Date.now();
     const event = {
       id, generation: id, type: this.generation ? 'library.replace' : 'library.initialize',
-      at: new Date(now).toISOString(), payload: { library }
+      at: new Date(now).toISOString(), payload: { library, ...(sourceHash ? { sourceHash } : {}) }
     };
     await this.write([{ event, revision: null, order: now }]);
     this.channel?.postMessage('changed');
@@ -129,7 +129,10 @@ export class StudyStore extends EventTarget {
   sync() {
     if (this.closed) return Promise.resolve();
     if (this.running) return this.running;
-    this.running = this.performSync().catch(error => this.failed(error)).finally(() => { this.running = null; });
+    this.running = this.performSync().catch(error => this.failed(error)).finally(() => {
+      this.running = null;
+      if (this.pending.length && !this.error && !this.closed) queueMicrotask(() => this.sync());
+    });
     return this.running;
   }
 

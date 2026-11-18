@@ -182,6 +182,11 @@ form { display: grid; gap: 12px; }
   <p id="auth-message" role="status"></p>
 </section>
 <div id="study-app" class="layout" hidden>
+  <section id="migration-panel" class="panel" style="grid-column: 1 / -1" hidden>
+    <h2>Saved library ready to transfer</h2>
+    <p>This account already has a cloud library. You can replace it with the saved library from the original app.</p>
+    <button id="migration-replace" class="button" type="button">Import saved library</button>
+  </section>
   <aside aria-label="Deck library">
     <div class="sidebar-heading">
       <h2>My decks</h2>
