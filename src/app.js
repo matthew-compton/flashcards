@@ -1023,11 +1023,15 @@ document.addEventListener("visibilitychange", refreshReviews);
 setInterval(refreshReviews, 30_000);
 
 function applyCloudLibrary(library) {
+  const previousDeckId = deckId;
   const current = round?.cards[round.index];
   const previousCard = current ? cardFor(current) : null;
   data = library;
   if (!findDeck()) deckId = data.decks[0]?.id;
-  if (!round) { startRound(); return; }
+  if (!round || previousDeckId !== deckId || (!round.cards.length && findDeck()?.cards.length)) {
+    startRound();
+    return;
+  }
   const currentCard = current ? cardFor(current) : null;
   if (current && !currentCard) { startRound(); return; }
   round.cards = [...round.cards.slice(0, round.index), ...round.cards.slice(round.index).filter(entry => cardFor(entry))];

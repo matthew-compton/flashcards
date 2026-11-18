@@ -105,3 +105,14 @@ test('a second account has an isolated local cache and server event stream', asy
   assert.equal(b.records.length,0);
   a.close();b.close();
 });
+
+test('completed sync notifies controls after releasing the running state', async () => {
+  const backend = server();
+  const owner = crypto.randomUUID();
+  const store = await new StudyStore(backend.forUser(owner), owner).open();
+  const states = [];
+  store.addEventListener('status', () => states.push({ status: store.status, running: Boolean(store.running) }));
+  await store.sync();
+  assert.deepEqual(states.at(-1), { status: 'Synced', running: false });
+  store.close();
+});

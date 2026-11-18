@@ -131,6 +131,7 @@ export class StudyStore extends EventTarget {
     if (this.running) return this.running;
     this.running = this.performSync().catch(error => this.failed(error)).finally(() => {
       this.running = null;
+      this.dispatchEvent(new Event('status'));
       if (this.pending.length && !this.error && !this.closed) queueMicrotask(() => this.sync());
     });
     return this.running;
