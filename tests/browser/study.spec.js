@@ -5,8 +5,58 @@ const prompt = page => page.locator('#term');
 
 async function openStudy(page) {
   await page.goto('/flashcards/');
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+  if (await page.locator('#show-decks').isVisible()) await page.getByRole('button', { name: 'Browse decks' }).click();
+  await page.getByRole('button', { name: /^Sample one/ }).click();
   await expect(prompt(page)).toHaveText('alpha');
 }
+
+async function goToToday(page) {
+  if (await page.locator('#show-decks').isVisible()) await page.getByRole('button', { name: 'My decks' }).click();
+  await page.getByRole('button', { name: 'Today', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+}
+
+test('Today opens due reviews and returns to the last studied deck', async ({ page }) => {
+  await page.goto('/flashcards/');
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '23 cards due' })).toBeVisible();
+  await expect(page.locator('#today-direction')).toHaveText('French → English');
+  await expect(card(page)).toBeHidden();
+  await expect(page.locator('#today-recent')).toBeHidden();
+  await page.locator('#account-settings summary').click();
+  await expect(page.locator('.account-menu > :first-child')).toContainText('test@example.invalid');
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'Start review' }).click();
+  await expect(page.locator('#position')).toHaveText('Card 1 of 20');
+  await expect(page.locator('#card-source')).toContainText('Mix fixture');
+  await goToToday(page);
+  if (await page.locator('#show-decks').isVisible()) await page.getByRole('button', { name: 'Browse decks' }).click();
+  else {
+    await page.getByRole('button', { name: 'Browse decks' }).click();
+    await expect(page.getByRole('heading', { name: 'My decks' })).toBeFocused();
+  }
+  await page.getByRole('button', { name: /^Sample two/ }).click();
+  await expect(prompt(page)).toHaveText('delta');
+  await card(page).click();
+  await page.locator('#correct').click();
+  await expect(prompt(page)).toHaveText('epsilon');
+
+  await goToToday(page);
+  const recent = page.getByRole('button', { name: /^Sample two Last studied/ });
+  await recent.click();
+  await expect(prompt(page)).toHaveText('epsilon');
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+  await recent.click();
+  await expect(prompt(page)).toHaveText('delta');
+  await page.locator('#account-settings summary').click();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('heading', { name: 'Your flashcards' })).toBeVisible();
+  await expect(page.locator('#account-email')).toHaveText('');
+  await expect(page.locator('#today-recent-deck')).toHaveText('');
+});
 
 test('tap to reveal, grade, undo, and return a skipped card to the end', async ({ page }) => {
   await openStudy(page);
@@ -104,10 +154,26 @@ test('Chromium touch keeps swipe grading, tap, long-press, and undo available', 
 test('mobile uses a left drawer and a separate account menu', async ({ page }, info) => {
   test.skip(info.project.name === 'desktop', 'Mobile navigation');
   await openStudy(page);
-  await page.getByRole('button', { name: 'My decks' }).click();
+  const openDecks = page.getByRole('button', { name: 'My decks' });
+  await openDecks.click();
   const drawer = page.getByRole('dialog', { name: 'My decks' });
   await expect(drawer).toBeVisible();
-  expect((await drawer.boundingBox()).x).toBe(0);
+  const edge = await drawer.boundingBox();
+  expect(edge.x).toBe(0);
+  await expect(drawer.getByRole('button', { name: 'Close' })).toHaveCount(0);
+  const y = Math.round(edge.height / 2);
+  await page.touchscreen.tap(Math.round(edge.width / 2), Math.round(edge.height - 28));
+  await expect(drawer).toBeVisible();
+  await page.touchscreen.tap(Math.round((edge.width + page.viewportSize().width) / 2), y);
+  await expect(drawer).toBeHidden();
+  await expect(prompt(page)).toHaveText('alpha');
+  await openDecks.focus();
+  await page.keyboard.press('Enter');
+  await expect(drawer).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+  await expect(openDecks).toBeFocused();
+  await openDecks.click();
   await drawer.getByRole('button', { name: /^Sample two/ }).click();
   await expect(drawer).toBeHidden();
   await expect(prompt(page)).toHaveText('delta');
@@ -117,6 +183,31 @@ test('mobile uses a left drawer and a separate account menu', async ({ page }, i
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'Sync now' })).toBeHidden();
+});
+
+test('a left swipe dismisses the drawer and preserves the active card', async ({ page, context }, info) => {
+  test.skip(info.project.name !== 'phone', 'Requires Chromium touch emulation');
+  await openStudy(page);
+  await page.getByRole('button', { name: 'My decks' }).tap();
+  const drawer = page.getByRole('dialog', { name: 'My decks' });
+  const deck = await drawer.getByRole('button', { name: /^Sample two/ }).boundingBox();
+  const cdp = await context.newCDPSession(page);
+  const x = Math.round(deck.x + deck.width / 2);
+  const y = Math.round(deck.y + deck.height / 2);
+  const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  const swipe = async (dx, dy) => {
+    await touch('touchStart', [{ x, y }]);
+    await touch('touchMove', [{ x: x + dx, y: y + dy }]);
+    await touch('touchEnd', []);
+  };
+
+  await swipe(-24, 0);
+  await expect(drawer).toBeVisible();
+  await swipe(0, 90);
+  await expect(drawer).toBeVisible();
+  await swipe(-100, 0);
+  await expect(drawer).toBeHidden();
+  await expect(prompt(page)).toHaveText('alpha');
 });
 
 for (const mode of ['Review due cards', 'Missed cards', 'Shuffle selected decks']) {
@@ -144,6 +235,10 @@ for (const mode of ['Review due cards', 'Missed cards', 'Shuffle selected decks'
     await page.getByRole('button', { name: 'Start another mix' }).click();
     if (mode === 'Review due cards') {
       await expect(page.getByRole('button', { name: 'Start review' })).toBeDisabled();
+      await page.locator('#close-mix').click();
+      await goToToday(page);
+      await expect(page.getByRole('heading', { name: 'No cards due' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Start review' })).toBeHidden();
       return;
     }
     await page.getByLabel('All eligible cards').check();

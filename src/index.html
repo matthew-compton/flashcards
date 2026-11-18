@@ -35,9 +35,13 @@ header { background: white; border-bottom: 1px solid var(--line); }
 .account-settings { position: relative; }
 .account-settings summary { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; font-size: 1.3rem; cursor: pointer; list-style: none; }
 .account-settings summary::-webkit-details-marker { display: none; }
-.account-menu { position: absolute; z-index: 2; top: calc(100% + 6px); right: 0; width: 196px; display: grid; gap: 6px; padding: 8px; background: white; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px #28203c23; }
+.account-menu { position: absolute; z-index: 2; top: calc(100% + 6px); right: 0; width: min(260px, calc(100vw - 32px)); display: grid; gap: 6px; padding: 8px; background: white; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px #28203c23; }
 .account-menu .button { min-height: 44px; text-align: left; }
 .account-menu .sync-status { padding: 4px 6px; font-size: .8rem; }
+.account-identity { display: flex; align-items: center; gap: 9px; padding: 9px; margin-bottom: 3px; border-radius: 8px; background: var(--tint); }
+.account-initial { display: grid; place-items: center; flex: 0 0 36px; height: 36px; border-radius: 50%; background: white; color: var(--accent); font-weight: 700; }
+.account-label { display: block; color: var(--muted); font-size: .79rem; }
+.account-email { display: block; overflow-wrap: anywhere; font-size: .9rem; }
 .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; }
 .brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--accent); color: white; font: bold 23px Georgia, serif; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -54,7 +58,7 @@ h1 { font-size: clamp(1.9rem, 5vw, 2.75rem); letter-spacing: -.045em; line-heigh
 h2 { font-size: 1.2rem; }
 h3 { font-size: .9rem; overflow-wrap: anywhere; }
 .mix-entry { width: 100%; margin-bottom: 12px; text-align: left; background: var(--tint); }
-.mix-entry[aria-current="true"] { border-color: var(--accent); color: #4c358e; }
+.mix-entry[aria-current] { border-color: var(--accent); color: #4c358e; }
 .category + .category { margin-top: 12px; }
 .category-heading { display: flex; align-items: center; gap: 10px; list-style: none; padding: 10px 11px; border-radius: 9px; background: var(--tint); cursor: pointer; }
 .category-heading::-webkit-details-marker { display: none; }
@@ -78,6 +82,21 @@ h3 { font-size: .9rem; overflow-wrap: anywhere; }
 .checked-date { color: var(--muted); font-size: .75rem; }
 .stat .checked-date { display: block; }
 .study-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+.today-page { display: grid; gap: 14px; max-width: 620px; }
+.today-review { display: grid; justify-items: start; gap: 12px; padding: 18px; border-radius: 14px; color: white; background: linear-gradient(135deg, var(--accent), #472f91); }
+.today-review p { color: #efe8fc; font-size: .875rem; }
+.today-review .button { color: #4c368f; border-color: white; }
+.today-page .button { min-height: 44px; }
+.today-recent { display: flex; justify-content: space-between; align-items: center; gap: 12px; text-align: left; }
+.today-recent strong, .today-recent small { display: block; overflow-wrap: anywhere; }
+.today-recent small { font-weight: 400; }
+.today-recent > [aria-hidden] { color: var(--accent); font-size: 1.35rem; }
+.today-empty { padding: 16px; }
+.today-empty p { margin: 0 0 12px; }
+.mobile-home-brand { display: none; }
+@media (min-width: 761px) {
+  .study-header:has(#study-title[hidden]) { display: none; }
+}
 .eyebrow { font-size: .8rem; font-weight: 650; color: var(--accent); margin-bottom: 6px; overflow-wrap: anywhere; }
 .muted { color: var(--muted); }
 .stats { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-bottom: 24px; }
@@ -170,6 +189,8 @@ form { display: grid; gap: 12px; }
   .layout { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: max(12px, env(safe-area-inset-top)) 0 max(16px, env(safe-area-inset-bottom)); }
   .study-header { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 8px; margin-bottom: 12px; }
   .study-header h1 { font-size: 1.125rem; line-height: 1.22; letter-spacing: -.02em; text-align: center; }
+  .mobile-home-brand { display: flex; justify-content: center; gap: 8px; }
+  .mobile-home-brand .brand-mark { width: 25px; height: 25px; border-radius: 7px; font-size: 18px; }
   .study-header #category-name, .desktop-flip-hint, .grade kbd, #skip span { display: none; }
   .mobile-study-control, .mobile-flip-hint { display: inline-block; }
   .mobile-study-control, .undo-actions .button, .mobile-sheet .button { min-height: 44px; min-width: 44px; }
@@ -178,6 +199,7 @@ form { display: grid; gap: 12px; }
   .card-stage.swipe-active .study-options-button { visibility: hidden; }
   .mobile-sheet { max-height: 86dvh; padding: 16px; }
   .mobile-drawer { position: fixed; inset: 0 auto 0 0; margin: 0; width: min(320px, calc(100vw - 40px)); height: 100dvh; max-height: none; max-width: none; border-radius: 0 14px 14px 0; padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .mobile-drawer { touch-action: pan-y pinch-zoom; translate: var(--drawer-offset, 0px) 0; }
   .mobile-sheet .editor-heading { margin-bottom: 12px; }
   #mobile-deck-controls { margin-top: 16px; }
   #mobile-deck-controls .stats { margin: 14px 0 0; gap: 8px; }
@@ -203,6 +225,10 @@ form { display: grid; gap: 12px; }
     <details class="account-settings" id="account-settings" hidden>
       <summary class="button" aria-label="Settings" title="Settings">⚙</summary>
       <div class="account-menu">
+        <div class="account-identity">
+          <span id="account-initial" class="account-initial" aria-hidden="true" hidden></span>
+          <div><span id="account-label" class="account-label"></span><strong id="account-email" class="account-email"></strong></div>
+        </div>
         <button id="sync-now" class="button" type="button">Sync now</button>
         <span id="sync-status" class="sync-status" role="status" hidden></span>
         <button id="export" class="button" type="button">Export backup</button>
@@ -232,10 +258,11 @@ form { display: grid; gap: 12px; }
   </section>
   <aside id="deck-library" aria-label="Deck library">
     <div class="sidebar-heading">
-      <h2>My decks</h2>
+      <h2 id="deck-library-title" tabindex="-1">My decks</h2>
       <button id="new-deck" class="button">+ New deck</button>
     </div>
     <nav aria-label="Study navigation">
+      <button id="open-today" class="button mix-entry" type="button">Today</button>
       <button id="open-mix" class="button mix-entry" type="button">Interleave your decks</button>
       <button id="open-flags" class="button mix-entry" type="button">Flagged cards</button>
       <div id="library"></div>
@@ -244,7 +271,8 @@ form { display: grid; gap: 12px; }
   <main>
     <div class="study-header">
       <button class="button mobile-study-control" id="show-decks" type="button" aria-haspopup="dialog" aria-label="My decks">☰</button>
-      <div><p id="category-name" class="eyebrow"></p><h1 id="deck-title"></h1></div>
+      <div id="study-title"><p id="category-name" class="eyebrow"></p><h1 id="deck-title" tabindex="-1"></h1></div>
+      <div id="mobile-home-brand" class="brand mobile-home-brand" hidden><span class="brand-mark" aria-hidden="true">F</span> Flashcards</div>
       <div class="actions" id="study-actions">
         <button class="button" id="direction" title="Change the language order for vocabulary and examples">French → English</button>
         <button class="button" id="shuffle">Shuffle</button>
@@ -253,6 +281,21 @@ form { display: grid; gap: 12px; }
       </div>
       <div id="mobile-settings"></div>
     </div>
+    <section id="today" class="today-page" aria-labelledby="today-title" hidden>
+      <h1 id="today-title" tabindex="-1">Today</h1>
+      <section class="today-review" aria-labelledby="today-due">
+        <div><h2 id="today-due"></h2><p id="today-direction"></p></div>
+        <button id="today-start-review" class="button" type="button">Start review</button>
+      </section>
+      <button id="today-recent" class="button today-recent" type="button" hidden>
+        <span><strong id="today-recent-deck"></strong><small id="today-recent-date" class="muted"></small></span><span aria-hidden="true">›</span>
+      </button>
+      <button id="today-browse" class="button" type="button">Browse decks</button>
+      <div id="today-empty" class="panel today-empty" hidden>
+        <p class="muted">Create a deck or import a backup to start studying.</p>
+        <button id="today-import" class="button" type="button">Import backup</button>
+      </div>
+    </section>
     <div id="stats" class="stats">
       <div class="stat"><span>Latest deck scores</span><dl id="deck-session-scores" class="deck-session-scores"></dl><small id="deck-checked" class="checked-date" hidden></small></div>
       <div class="stat"><span>Category success rate</span><strong id="category-rate"></strong><small id="category-attempts"></small></div>
@@ -290,9 +333,7 @@ form { display: grid; gap: 12px; }
     <p id="notice" class="notice" role="status" hidden></p>
   </main>
 </div>
-<dialog id="mobile-decks" class="mobile-sheet mobile-drawer" aria-label="My decks">
-  <div class="editor-heading"><button class="button" id="close-mobile-decks" type="button" autofocus>Close</button></div>
-</dialog>
+<dialog id="mobile-decks" class="mobile-sheet mobile-drawer" aria-label="My decks" autofocus></dialog>
 <dialog id="mobile-study-options" class="mobile-sheet" aria-labelledby="mobile-options-title">
   <div class="editor-heading"><h2 id="mobile-options-title">Study options</h2><button class="button" id="close-mobile-options" type="button">Close</button></div>
   <div id="mobile-card-actions"></div>

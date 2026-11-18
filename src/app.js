@@ -70,7 +70,8 @@ async function save(next) {
     return true;
   } catch (error) { notice(error.message); return false; }
 }
-let deckId = data.decks[0]?.id;
+let showingToday = true;
+let deckId;
 let editingId;
 let editingOriginal;
 let front = "fr";
@@ -380,7 +381,10 @@ try {
 function renderLibrary(groups) {
   const selected = document.activeElement?.dataset;
   const now = new Date();
-  if (round.mix) $("open-mix").setAttribute("aria-current", "true");
+  const defaultSection = findDeck()?.category ?? groups.keys().next().value;
+  if (showingToday) $("open-today").setAttribute("aria-current", "page");
+  else $("open-today").removeAttribute("aria-current");
+  if (!showingToday && round?.mix) $("open-mix").setAttribute("aria-current", "true");
   else $("open-mix").removeAttribute("aria-current");
   $("library").replaceChildren();
   for (const [name, group] of groups) {
@@ -389,7 +393,7 @@ function renderLibrary(groups) {
     heading.dataset.category = name;
     heading.append(make("h3", "", name));
     section.append(heading);
-    if (!expandedSections.has(name)) expandedSections.set(name, findDeck()?.category === name);
+    if (!expandedSections.has(name)) expandedSections.set(name, defaultSection === name);
     section.open = expandedSections.get(name);
     section.addEventListener("toggle", () => {
       if (!section.isConnected || expandedSections.get(name) === section.open) return;
@@ -405,7 +409,7 @@ function renderLibrary(groups) {
       const button = make("button", "deck", "");
       button.type = "button";
       button.dataset.deck = deck.id;
-      if (!round.mix && deck.id === deckId) button.setAttribute("aria-current", "true");
+      if (!showingToday && !round?.mix && deck.id === deckId) button.setAttribute("aria-current", "true");
       const label = make("span", "deck-name", deck.name);
       const cardCount = deck.cards.length + (deck.cards.length === 1 ? " card" : " cards");
       label.append(make("span", "deck-details", deck.topic ? deck.topic + " · " + cardCount : cardCount));
@@ -426,13 +430,7 @@ function renderLibrary(groups) {
       button.setAttribute("aria-description", sessionRate.title);
       score.append(sessionRate, checked);
       button.append(label, score);
-      button.addEventListener("click", () => {
-        $("mobile-decks").close();
-        if (!round.mix && deckId === deck.id) return;
-        deckId = deck.id;
-        startRound();
-        $("card").focus();
-      });
+      button.addEventListener("click", () => openDeck(deck.id));
       section.append(button);
     }
     heading.append(make("span", "category-rate", rate(group)));
@@ -456,6 +454,7 @@ function renderLibrary(groups) {
 function beginRound(cards, { shuffle = false, mix = null } = {}) {
   cards = cards.map(entry => ({ ...entry, cardId: entry.cardId ?? cardFor(entry)?.id }));
   round = createRound(cards, { id: crypto.randomUUID(), shuffle, mix });
+  showingToday = false;
   render();
 }
 
@@ -464,6 +463,71 @@ function startRound(shuffle = false) {
   const deck = findDeck();
   const cards = deck?.cards.map((_, cardIndex) => ({ deckId: deck.id, cardIndex })) ?? [];
   beginRound(shuffle ? shuffled(cards) : cards, { shuffle });
+}
+
+function openDeck(id) {
+  if (!findDeck(id)) return;
+  deckDrawer.close();
+  if (round && !round.mix && deckId === id) {
+    if (!showingToday) return;
+    showingToday = false;
+    render();
+  } else {
+    deckId = id;
+    startRound();
+  }
+  ($("review").hidden ? $("deck-title") : $("card")).focus();
+}
+
+function resetStudy() {
+  showingToday = true;
+  deckId = undefined;
+  front = "fr";
+  round = null;
+  mixSettings = undefined;
+  mixQueue = [];
+}
+
+function todayReviewSettings(groups) {
+  return { mode: "due", direction: front, sections: new Set(groups.keys()), size: MIX_SIZE };
+}
+
+function lastStudiedDeck() {
+  let latest;
+  let latestTime = -Infinity;
+  for (const deck of data.decks) {
+    if (!deck.cards.length) continue;
+    const dates = [deck.checkedAt, ...(deck.sessions ?? []).map(session => session.checkedAt)];
+    for (const checkedAt of dates) {
+      const time = Date.parse(checkedAt);
+      if (time > latestTime) {
+        latestTime = time;
+        latest = { id: deck.id, name: deck.name, checkedAt };
+      }
+    }
+  }
+  return latest;
+}
+
+function renderToday(groups) {
+  const settings = todayReviewSettings(groups);
+  const buckets = reviewBuckets(data.decks, settings, Date.now());
+  const count = buckets.reduce((total, bucket) => total + bucket.cards.length, 0);
+  const directions = new Set();
+  for (const { deck, cards } of buckets) {
+    if (cards.some(entry => !isExercise(deck.cards[entry.cardIndex]))) directions.add(directionName(front, deck));
+    if (cards.some(entry => isExercise(deck.cards[entry.cardIndex]))) directions.add("Fixed exercises");
+  }
+  $("today-due").textContent = count ? count + (count === 1 ? " card due" : " cards due") : "No cards due";
+  $("today-direction").textContent = directions.size === 1 ? directions.values().next().value : "Mixed practice";
+  $("today-direction").hidden = $("today-start-review").hidden = !count;
+  $("today-empty").hidden = Boolean(data.decks.length);
+
+  const recent = lastStudiedDeck();
+  $("today-recent").hidden = !recent;
+  $("today-recent-deck").textContent = recent?.name ?? "";
+  $("today-recent-date").textContent = recent ? "Last studied " + formatStudyDate(recent.checkedAt, checkedDateFormat) : "";
+  $("today-recent").onclick = recent ? () => openDeck(recent.id) : null;
 }
 
 function mixSelection() {
@@ -478,6 +542,17 @@ function nextMixRound() {
   front = mixSettings.direction;
   beginRound(mixQueue.splice(0, mixSettings.size), { mix: mixSettings.mode });
   $("card").focus();
+}
+
+function startMix(settings) {
+  const cards = selectReview(data.decks, settings);
+  if (!cards.length) return false;
+  mixSettings = settings;
+  mixQueue = cards;
+  $("mix-dialog").close();
+  notice("");
+  nextMixRound();
+  return true;
 }
 
 function updateMixStatus() {
@@ -526,6 +601,13 @@ function render() {
   refreshFlagCount();
   const groups = categories();
   renderLibrary(groups);
+  $("today").hidden = $("mobile-home-brand").hidden = !showingToday;
+  $("study-title").hidden = showingToday;
+  if (showingToday) {
+    $("study-actions").hidden = $("stats").hidden = $("review").hidden = $("message").hidden = $("undo-actions").hidden = true;
+    renderToday(groups);
+    return;
+  }
   const mix = round.mix;
   const deck = mix ? null : findDeck();
   $("deck-title").textContent = mix ? "Interleave your decks" : deck?.name ?? "Your flashcards";
@@ -665,7 +747,7 @@ async function grade(correct) {
   const direction = practiceDirection(card, front);
   const graded = await saveRoundChange((activeRound, status) =>
     gradeRound(activeRound, { correct, direction, ...status }));
-  if (!graded) return;
+  if (!graded || showingToday) return;
   notice("");
   $(round.index === round.cards.length ? "message-action" : "card").focus();
 }
@@ -676,7 +758,7 @@ async function undoGrade() {
     if (restoredDirection && restoredDirection !== "exercise") front = restoredDirection;
     return restoredDirection;
   });
-  if (!direction) return;
+  if (!direction || showingToday) return;
   notice("");
   $("card").focus();
 }
@@ -819,9 +901,9 @@ $("backup-file").onchange = async event => {
   try { await store.importLibrary(imported); }
   catch (error) { if (studyStore === store) notice(error.message); return; }
   if (studyStore !== store) return;
-  deckId = data.decks[0]?.id;
+  resetStudy();
   notice("");
-  startRound();
+  render();
 };
 $("new-deck").onclick = () => {
   $("mobile-decks").close();
@@ -933,19 +1015,9 @@ $("open-mix").onclick = () => {
 };
 $("close-mix").onclick = () => $("mix-dialog").close();
 $("mix-form").addEventListener("change", updateMixStatus);
-$("mix-form").addEventListener("submit", async event => {
+$("mix-form").addEventListener("submit", event => {
   event.preventDefault();
-  const settings = mixSelection();
-  const cards = selectReview(data.decks, settings);
-  if (!cards.length) {
-    updateMixStatus();
-    return;
-  }
-  mixSettings = settings;
-  mixQueue = cards;
-  $("mix-dialog").close();
-  notice("");
-  nextMixRound();
+  if (!startMix(mixSelection())) updateMixStatus();
 });
 $("add-card").onclick = () => addCardFields(undefined, true);
 $("close-editor").onclick = () => $("editor").close();
@@ -999,8 +1071,9 @@ document.addEventListener("keydown", event => {
 });
 
 const mobileStudy = window.matchMedia("(max-width: 760px)");
+const deckDrawer = $("mobile-decks");
 const movableControls = [
-  [$("deck-library"), $("mobile-decks")],
+  [$("deck-library"), deckDrawer],
   [$("flag-card"), $("mobile-card-actions")],
   [$("study-actions"), $("mobile-deck-controls")],
   [$("stats"), $("mobile-deck-controls")],
@@ -1012,7 +1085,7 @@ const movableControls = [
 });
 function placeStudyControls() {
   cancelCardGesture();
-  $("mobile-decks").close();
+  deckDrawer.close();
   $("mobile-study-options").close();
   for (const { element, mobileContainer, desktopPosition } of movableControls) {
     // Keep the sign-in view's controls in the ordinary app header.
@@ -1027,12 +1100,88 @@ const cancelCardGesture = bindCardGestures({
   isRevealed: () => Boolean(round?.revealed)
 });
 mobileStudy.addEventListener("change", placeStudyControls);
-$("show-decks").onclick = () => { if (!saving) $("mobile-decks").showModal(); };
+function openDeckLibrary() {
+  if (mobileStudy.matches) {
+    if (!saving) deckDrawer.showModal();
+  } else {
+    $("deck-library-title").focus();
+  }
+}
+$("show-decks").onclick = $("today-browse").onclick = openDeckLibrary;
+$("open-today").onclick = () => {
+  deckDrawer.close();
+  showingToday = true;
+  render();
+  $("today-title").focus();
+};
+$("today-start-review").onclick = () => {
+  const groups = categories();
+  if (!startMix(todayReviewSettings(groups))) renderToday(groups);
+};
+$("today-import").onclick = $("import").onclick;
 for (const id of ["show-study-options", "show-finished-options"]) {
   $(id).onclick = () => { if (!saving) $("mobile-study-options").showModal(); };
 }
-$("close-mobile-decks").onclick = () => $("mobile-decks").close();
 $("close-mobile-options").onclick = () => $("mobile-study-options").close();
+
+let startedOnBackdrop = false;
+let drawerSwipe;
+let suppressDrawerClick = false;
+
+function onDrawerBackdrop(event) {
+  if (event.target !== deckDrawer) return false;
+  const { left, top, right, bottom } = deckDrawer.getBoundingClientRect();
+  return event.clientX < left || event.clientX >= right || event.clientY < top || event.clientY >= bottom;
+}
+
+function resetDrawerSwipe() {
+  drawerSwipe = null;
+  deckDrawer.style.removeProperty("--drawer-offset");
+}
+
+function trackDrawerSwipe(event) {
+  const dx = event.clientX - drawerSwipe.x;
+  const dy = event.clientY - drawerSwipe.y;
+  if (!drawerSwipe.axis && Math.max(Math.abs(dx), Math.abs(dy)) >= 10) {
+    drawerSwipe.axis = Math.abs(dx) > Math.abs(dy) * 1.3 ? "horizontal" : "vertical";
+  }
+  return drawerSwipe.axis === "horizontal" && Math.abs(dx) > Math.abs(dy) * 1.3 ? dx : 0;
+}
+
+deckDrawer.addEventListener("pointerdown", event => {
+  resetDrawerSwipe();
+  startedOnBackdrop = event.isPrimary && event.button === 0 && onDrawerBackdrop(event);
+  suppressDrawerClick = false;
+  if (event.isPrimary && event.pointerType === "touch" && !startedOnBackdrop) {
+    drawerSwipe = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  }
+});
+deckDrawer.addEventListener("pointermove", event => {
+  if (event.pointerId !== drawerSwipe?.id) return;
+  const offset = Math.min(0, trackDrawerSwipe(event));
+  deckDrawer.style.setProperty("--drawer-offset", `${offset}px`);
+});
+deckDrawer.addEventListener("pointerup", event => {
+  if (event.pointerId !== drawerSwipe?.id) return;
+  const offset = trackDrawerSwipe(event);
+  suppressDrawerClick = Boolean(drawerSwipe.axis);
+  resetDrawerSwipe();
+  if (offset <= -64) deckDrawer.close();
+});
+deckDrawer.addEventListener("pointercancel", event => {
+  if (event.pointerId === drawerSwipe?.id) resetDrawerSwipe();
+  startedOnBackdrop = false;
+});
+deckDrawer.addEventListener("click", event => {
+  if (event.detail === 0) return;
+  if (suppressDrawerClick) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  } else if (startedOnBackdrop && onDrawerBackdrop(event)) {
+    deckDrawer.close();
+  }
+}, true);
+deckDrawer.addEventListener("close", resetDrawerSwipe);
 
 const settingsMenu = $("account-settings");
 document.addEventListener("pointerdown", event => {
@@ -1044,10 +1193,12 @@ settingsMenu.addEventListener("keydown", event => {
   settingsMenu.querySelector("summary").focus();
 });
 
-// Account loading starts the first round.
-
 function refreshReviews() {
-  if (Date.now() >= nextReviewRefresh) renderLibrary(categories());
+  if (Date.now() >= nextReviewRefresh) {
+    const groups = categories();
+    renderLibrary(groups);
+    if (showingToday) renderToday(groups);
+  }
   if ($("mix-dialog").open) updateMixStatus();
 }
 
@@ -1058,38 +1209,44 @@ setInterval(refreshReviews, 30_000);
 function applyCloudLibrary(library) {
   const generationChanged = activeGeneration !== studyStore?.generation;
   activeGeneration = studyStore?.generation;
-  const previousDeckId = deckId;
   const current = round?.cards[round.index];
   const previousCard = current ? cardFor(current) : null;
   data = library;
-  if (!findDeck()) deckId = data.decks[0]?.id;
-  if (!round || generationChanged || previousDeckId !== deckId || (!round.cards.length && findDeck()?.cards.length)) {
-    startRound();
+  if (generationChanged || (deckId && !findDeck())) resetStudy();
+  if (!round) {
+    render();
     return;
   }
   const currentCard = current ? cardFor(current) : null;
-  if (current && !currentCard) { startRound(); return; }
-  round.cards = [...round.cards.slice(0, round.index), ...round.cards.slice(round.index).filter(entry => cardFor(entry))];
-  if (previousCard && currentCard && (previousCard.fr !== currentCard.fr || previousCard.en !== currentCard.en)) {
-    resetFace(round);
+  if ((current && !currentCard) || (!round.mix && !round.cards.length && findDeck()?.cards.length)) {
+    if (!showingToday) { startRound(); return; }
+    round = null;
+  } else {
+    round.cards = [...round.cards.slice(0, round.index), ...round.cards.slice(round.index).filter(entry => cardFor(entry))];
+    if (previousCard && currentCard && (previousCard.fr !== currentCard.fr || previousCard.en !== currentCard.en)) {
+      resetFace(round);
+    }
   }
-  if (!saving && !document.querySelector('dialog[open]')) render();
+  if (!saving && (showingToday || !document.querySelector('dialog[open]'))) render();
 }
 
 await startCloud({
   onStore(store) {
-    studyStore = store; data = store.library; deckId = data.decks[0]?.id;
+    studyStore = store;
+    data = store.library;
+    resetStudy();
     activeGeneration = store.generation;
     placeStudyControls();
-    startRound();
+    render();
   },
   onLibrary: applyCloudLibrary,
   onSignOut() {
-    studyStore = null; data = { version: currentVersion, decks: [] }; round = null;
-    mixQueue = [];
-    mixSettings = undefined;
+    studyStore = null;
+    data = { version: currentVersion, decks: [] };
+    resetStudy();
     activeGeneration = undefined;
     $('library').replaceChildren(); $('term').textContent = '';
+    renderToday(new Map());
     for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
     $('study-app').hidden = true;
     placeStudyControls();

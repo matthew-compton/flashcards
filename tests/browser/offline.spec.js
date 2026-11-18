@@ -1,11 +1,17 @@
 import { test, expect } from '@playwright/test';
 
+async function openSampleDeck(page) {
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+  await page.locator('#library').getByRole('button', { name: /^Sample one/ }).click();
+  await expect(page.locator('#term')).toHaveText('alpha');
+}
+
 test('refresh loads the latest complete build and keeps it available offline', async ({ page, context, request }, info) => {
   test.skip(info.project.name !== 'desktop', 'Exercise both releases with a real service worker');
   await request.post('/test-release?version=v1');
   try {
     await page.goto('/flashcards/');
-    await expect(page.locator('#term')).toHaveText('alpha');
+    await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
     await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
     const release = page.locator('meta[name=fixture-release]');
 
@@ -22,7 +28,7 @@ test('refresh loads the latest complete build and keeps it available offline', a
     await context.setOffline(true);
     await page.reload();
     await expect(release).toHaveAttribute('content', 'v2');
-    await expect(page.locator('#term')).toHaveText('alpha');
+    await expect(page.getByRole('heading', { name: '23 cards due' })).toBeVisible();
   } finally {
     await context.setOffline(false);
     await request.post('/test-release?version=v1');
@@ -34,7 +40,7 @@ test('a queued offline grade survives an atomic shell upgrade and syncs once', a
   await request.post('/test-release?version=v1');
   try {
     await page.goto('/flashcards/');
-    await expect(page.locator('#term')).toHaveText('alpha');
+    await openSampleDeck(page);
     await expect(page.locator('#sync-status')).toBeHidden();
     await expect.poll(() => page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.active?.state))
       .toBe('activated');
@@ -42,10 +48,12 @@ test('a queued offline grade survives an atomic shell upgrade and syncs once', a
     await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
     await context.setOffline(true);
     await page.reload();
+    await openSampleDeck(page);
     await page.locator('#card').click();
     await page.locator('#correct').click();
     await expect(page.locator('#term')).toHaveText('beta');
     await page.locator('#account-settings summary').click();
+    await expect(page.locator('#account-email')).toHaveText('Email unavailable offline');
     await expect(page.locator('#sync-status')).toHaveText('1 change saved on this device.');
 
     // Let the browser download the update while the study server stays unreachable.
@@ -63,6 +71,7 @@ test('a queued offline grade survives an atomic shell upgrade and syncs once', a
     await page.reload();
     await expect(page.locator('meta[name=fixture-release]')).toHaveAttribute('content', 'v2');
     await expect.poll(() => page.evaluate(() => window.flashcardsTest.releaseName)).toBe('v2');
+    await openSampleDeck(page);
     await page.locator('#account-settings summary').click();
     await expect(page.locator('#sync-now')).toBeEnabled();
     await expect(page.locator('#sync-status')).toBeHidden();
@@ -79,7 +88,7 @@ test('a queued offline grade survives an atomic shell upgrade and syncs once', a
 test('grades sync on demand and on reload without routine status messages', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'Cloud timing is independent of screen size');
   await page.goto('/flashcards/');
-  await expect(page.locator('#term')).toHaveText('alpha');
+  await openSampleDeck(page);
   const openSettings = () => page.locator('#account-settings summary').click();
   await openSettings();
   await expect(page.locator('#sync-now')).toBeEnabled();
@@ -102,7 +111,7 @@ test('grades sync on demand and on reload without routine status messages', asyn
   await expect(page.locator('#term')).toHaveText('gamma');
   expect(await calls()).toBe(initialCalls + 1);
   await page.reload();
-  await expect(page.locator('#term')).toHaveText('alpha');
+  await openSampleDeck(page);
   await openSettings();
   await expect(page.locator('#sync-now')).toBeEnabled();
   await expect(page.locator('#sync-status')).toBeHidden();

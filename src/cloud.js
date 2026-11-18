@@ -28,6 +28,16 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
   });
   let migratingStore;
 
+  function showAccountIdentity(user) {
+    const email = user?.email ?? '';
+    const offline = !online();
+    $('account-label').textContent = email ? 'Signed in as' : user ? (offline ? 'Offline account' : 'Signed in') : '';
+    $('account-email').textContent = email || (user ? (offline ? 'Email unavailable offline' : 'Email unavailable') : '');
+    $('account-initial').textContent = email.charAt(0).toUpperCase();
+    $('account-initial').hidden = !email;
+    $('sign-out').title = email ? 'Signed in as ' + email : 'Sign out';
+  }
+
   async function transferProgress() {
     const activeStore = account.store;
     if (!activeStore || migratingStore === activeStore || activeStore.status !== 'Synced') return;
@@ -70,13 +80,13 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
     open: user => openStore(client, user.id),
     reset(user) {
       onSignOut();
+      showAccountIdentity(user);
       $('study-app').hidden = $('migration-panel').hidden = true;
       $('auth-panel').hidden = Boolean(user);
       $('sign-out').hidden = $('sync-now').hidden = !user;
       $('account-settings').hidden = !user;
       $('account-settings').open = false;
       $('export').hidden = $('import').hidden = !user;
-      $('sign-out').title = user?.email ? 'Signed in as ' + user.email : 'Sign out';
       $('export').disabled = $('import').disabled = !user;
       if (!user) {
         try { localStorage.removeItem('flashcards-last-account'); } catch { /* Optional offline preference. */ }
@@ -99,6 +109,7 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
       else { store.status = 'Offline · saved on this device'; status(); }
     },
     failed(error) {
+      showAccountIdentity(null);
       $('study-app').hidden = true;
       $('auth-panel').hidden = false;
       $('sign-out').hidden = $('sync-now').hidden = $('export').hidden = $('import').hidden = true;
@@ -106,6 +117,11 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
       $('auth-message').textContent = 'Your local storage could not be opened. ' + error.message;
     }
   });
+
+  async function switchAccount(user) {
+    await account.switchTo(user);
+    if (user?.email && account.store?.owner === user.id) showAccountIdentity(user);
+  }
 
   $('auth-form').addEventListener('submit', async event => {
     event.preventDefault();
@@ -155,19 +171,19 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
     if (event.persisted && online()) account.store?.sync();
   });
   client.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_OUT') account.switchTo(null);
-    else if (session?.user) account.switchTo(session.user);
+    if (event === 'SIGNED_OUT') switchAccount(null);
+    else if (session?.user) switchAccount(session.user);
   });
 
   if (!online()) {
     try {
       const last = JSON.parse(localStorage.getItem('flashcards-last-account'));
-      if (last?.id) await account.switchTo(last);
+      if (last?.id) await switchAccount(last);
     } catch { /* The sign-in panel remains available when no account is cached. */ }
   } else {
     const { data, error } = await client.auth.getSession();
     if (error) $('auth-message').textContent = error.message;
-    await account.switchTo(data?.session?.user ?? null);
+    await switchAccount(data?.session?.user ?? null);
   }
 
   if ('serviceWorker' in navigator) {
