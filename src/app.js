@@ -56,6 +56,11 @@ let studyStore;
 let saving = false;
 let lastSavedAnswerId;
 
+function notice(message) {
+  $("notice").hidden = !message;
+  $("notice").textContent = message;
+}
+
 async function save(next) {
   if (!studyStore) return false;
   try {
