@@ -16,6 +16,15 @@ npm start
 
 Set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in `.env`. Only an anon or publishable key belongs in the frontend. The build rejects secret and service-role keys. The preview listens on `127.0.0.1:8797`.
 
+## Tests
+
+- `npm test` runs the domain and storage tests. `npm run test:coverage` reports coverage for modules loaded by that suite.
+- `npm run test:db` applies the production migrations to disposable, embedded Postgres. CI also runs the suite against PostgreSQL 17 with two concurrent connections. For that mode locally, point `FLASHCARDS_TEST_DATABASE_URL` to an empty `flashcards_test` database on localhost.
+- `npx playwright install chromium` followed by `npm run test:browser` runs the real app with synthetic account data. Set `FLASHCARDS_TEST_CHROME` to a local Chrome executable to use it. Install WebKit and set `FLASHCARDS_TEST_WEBKIT=1` to add the iPhone layout tests. Device checks for browser context menus and navigation gestures still need physical phones.
+- `npm run bench:replay` measures event replay on a synthetic 44-deck collection. It excludes IndexedDB, networking, and browser rendering.
+
+Pull requests and Pages deployments run the quality workflow. The database and browser tests use isolated fixtures.
+
 ## Deployment
 
 GitHub Pages publishes `.github/workflows/pages.yml` after pushes to `main`. Set repository variables `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`. Keep the project's Supabase GitHub integration linked to this repository's `main` branch, working directory `.`. SQL migrations are in `supabase/migrations/`.
@@ -35,3 +44,7 @@ The original **Export backup** and the hosted **Import** also support the existi
 Each answer, Undo, card edit, and flag change has a unique event identifier. The backend assigns a per-account revision under a row lock, so retries cannot add the same event twice. Devices pull every revision in order. Offline answers replay by study time, and each direction maintains its own schedule and session score. Undo targets the original answer identifier.
 
 Replacing a library creates a new generation. Pending operations from an earlier generation remain in the event history and do not modify the replacement library. Simultaneous first-time imports choose the first committed initialization. Course content and backup files must stay out of the repository and build output.
+
+New events carry a schema version. The sync service accepts older events with the same shape and validates new inserts before committing a batch. Client validation rejects an invalid response before writing it to the local cache. Legacy backups with a calendar due date and no time zone are converted using UTC so a restore produces the same schedule on any device.
+
+The study round controller owns reveal, grade, skip, and undo. Review selection uses a clock and shuffle source that can be supplied by tests. Flagging, rewriting, and splitting a card produce explicit event batches. A split retains the first card's identity for its flag, assigns new IDs to added cards, and restarts the affected review schedules while keeping the deck scores and session history.

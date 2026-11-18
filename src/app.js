@@ -1,19 +1,16 @@
 import { prepareLibrary } from "./model.js";
 import { startCloud } from "./cloud.js";
 import { bindCardGestures } from "./swipe.js";
+import { resolveFlag, rewriteCard, splitCard, upsertFlag } from "./card-edits.js";
+import { createRound, flipRound, gradeRound, resetFace, skipRound, undoRound } from "./round.js";
+import { cardText, firstSide, isDue, isExercise, practiceDirection, reviewBuckets, selectReview, shuffled, MISSED_DAYS, MIX_SIZE } from "./review.js";
 "use strict";
 
-const storageKey = "french-flashcards-course-v3";
 const sectionStorageKey = "french-flashcards-library-sections";
 const currentVersion = 11;
-const dayMilliseconds = 24 * 60 * 60 * 1000;
-const legacyReviewIntervals = [1, 1, 3, 7, 14, 30, 60];
-const reviewIntervals = [1, 7, 14, 30, 60, 60, 60];
-const mixSize = 20;
-const missedReviewDays = 7;
 const mixModes = {
   due: { title: "Spaced review", empty: "No cards are due. Try shuffling these sections." },
-  missed: { title: "Missed cards", empty: "No cards to retry from the last " + missedReviewDays + " days." },
+  missed: { title: "Missed cards", empty: "No cards to retry from the last " + MISSED_DAYS + " days." },
   shuffle: { title: "Shuffled review", empty: "These sections have no cards." }
 };
 const sessionModes = {
@@ -33,14 +30,14 @@ function languageName(code) {
 }
 
 function cardLanguage(deck, side) {
-  return side === 'fr' ? deck?.frontLanguage ?? 'fr' : deck?.backLanguage ?? 'en';
+  return side === 'front' ? deck?.frontLanguage ?? 'fr' : deck?.backLanguage ?? 'en';
 }
 
 function directionName(direction, deck) {
   if (direction === 'exercise') return;
   if (!deck) return directionLabels[direction];
-  const first = direction === 'fr' ? 'fr' : 'en';
-  const last = first === 'fr' ? 'en' : 'fr';
+  const first = firstSide(direction);
+  const last = first === 'front' ? 'back' : 'front';
   return languageName(cardLanguage(deck, first)) + ' → ' + languageName(cardLanguage(deck, last));
 }
 const flagReasons = { context: "Needs context", wording: "Unclear wording", error: "Possible error" };
@@ -54,8 +51,8 @@ const cardLabels = {
 
 let data = { version: currentVersion, decks: [] };
 let studyStore;
+let activeGeneration;
 let saving = false;
-let lastSavedAnswerId;
 
 function notice(message) {
   $("notice").hidden = !message;
@@ -63,11 +60,13 @@ function notice(message) {
 }
 
 async function save(next) {
-  if (!studyStore) return false;
+  const store = studyStore;
+  if (!store) return false;
   try {
-    if (!studyStore.generation) await studyStore.importLibrary(next);
-    else await studyStore.saveLibrary(data, next);
-    data = studyStore.library;
+    if (!store.generation) await store.importLibrary(next);
+    else await store.saveLibrary(data, next);
+    if (studyStore !== store) return false;
+    data = store.library;
     return true;
   } catch (error) { notice(error.message); return false; }
 }
@@ -90,23 +89,6 @@ function cardFor(entry) {
 
 function findDeck(id = deckId) {
   return data.decks.find(deck => deck.id === id);
-}
-
-function isExercise(card) {
-  return card.kind === "grammar" || card.kind === "conjugation";
-}
-
-function practiceDirection(card, language) {
-  return isExercise(card) ? "exercise" : language;
-}
-
-function reviewField(direction) {
-  // Older reviews were always French-first or fixed prompt exercises.
-  return direction === "en" ? "recallReview" : "review";
-}
-
-function isDue(review, now) {
-  return Boolean(review && Date.parse(review.dueAt) <= now.getTime());
 }
 
 function scorePercent({ correct, attempts }) {
@@ -281,13 +263,16 @@ function make(tag, className, value) {
   return element;
 }
 
-async function saveCardUpdate(entry, updated) {
-  const decks = data.decks.map(deck => {
-    if (deck.id !== entry.deckId) return deck;
-    const cards = deck.cards.map((card, index) => index === entry.cardIndex ? updated : card);
-    return { ...deck, cards };
-  });
-  return save({ ...data, decks });
+async function saveCardOperations(plan) {
+  const store = studyStore;
+  if (!store) return false;
+  try {
+    const operations = plan();
+    if (operations.length) await store.commit(operations);
+    if (studyStore !== store) return false;
+    data = store.library;
+    return true;
+  } catch (error) { notice(error.message); return false; }
 }
 
 function refreshFlagCount() {
@@ -320,18 +305,17 @@ function openFlagFix(entry, flagId) {
   $("fix-front").value = card.fr;
   $("fix-back").value = card.en;
   const deck = findDeck(entry.deckId);
-  $("fix-front-label").firstChild.textContent = isExercise(card) ? "Question" : languageName(cardLanguage(deck, 'fr'));
-  $("fix-back-label").firstChild.textContent = isExercise(card) ? "Answer" : languageName(cardLanguage(deck, 'en'));
+  $("fix-front-label").firstChild.textContent = isExercise(card) ? "Question" : languageName(cardLanguage(deck, 'front'));
+  $("fix-back-label").firstChild.textContent = isExercise(card) ? "Answer" : languageName(cardLanguage(deck, 'back'));
   $("fix-reset").checked = true;
+  $("split-fields").replaceChildren();
+  updateSplitPreview();
   flagError("fix-error");
   $("fix-dialog").showModal();
 }
 
 async function setFlagResolved(entry, flagId, resolved) {
-  const card = cardFor(entry);
-  const flags = card.flags.map(flag => flag.id === flagId
-    ? { ...flag, resolvedAt: resolved ? new Date().toISOString() : undefined } : flag);
-  if (!await saveCardUpdate(entry, { ...card, flags })) {
+  if (!await saveCardOperations(() => [resolveFlag(data, entry, flagId, resolved ? new Date().toISOString() : null)])) {
     flagError("flags-error", "The flag could not be saved. Allow browser storage, then try again.");
     return;
   }
@@ -353,7 +337,7 @@ function renderFlagList() {
       " · " + formatStudyDate(flag.flaggedAt, historyDateFormat, historyTimeFormat)));
     if (flag.note) row.append(make("p", "", flag.note));
     const original = make("dl", "", "");
-    const snapshotLabels = isExercise(deck.cards[cardIndex]) ? ["Original question", "Original answer"] : ["Original " + languageName(cardLanguage(deck, 'fr')), "Original " + languageName(cardLanguage(deck, 'en'))];
+    const snapshotLabels = isExercise(deck.cards[cardIndex]) ? ["Original question", "Original answer"] : ["Original " + languageName(cardLanguage(deck, 'front')), "Original " + languageName(cardLanguage(deck, 'back'))];
     original.append(make("dt", "", snapshotLabels[0]), make("dd", "", flag.original.fr),
       make("dt", "", snapshotLabels[1]), make("dd", "", flag.original.en));
     row.append(original);
@@ -468,24 +452,16 @@ function renderLibrary(groups) {
   }, Infinity);
 }
 
-function shuffleItems(items) {
-  for (let index = items.length - 1; index > 0; index--) {
-    const other = Math.floor(Math.random() * (index + 1));
-    [items[index], items[other]] = [items[other], items[index]];
-  }
-  return items;
-}
-
 function beginRound(cards, { shuffle = false, mix = null } = {}) {
   cards = cards.map(entry => ({ ...entry, cardId: entry.cardId ?? cardFor(entry)?.id }));
-  round = { id: crypto.randomUUID(), cards, index: 0, correct: 0, revealed: false, graded: false, shuffle, mix, lastGrade: null };
+  round = createRound(cards, { id: crypto.randomUUID(), shuffle, mix });
   render();
 }
 
 function startRound(shuffle = false) {
   const deck = findDeck();
   const cards = deck?.cards.map((_, cardIndex) => ({ deckId: deck.id, cardIndex })) ?? [];
-  beginRound(shuffle ? shuffleItems(cards) : cards, { shuffle });
+  beginRound(shuffle ? shuffled(cards) : cards, { shuffle });
 }
 
 function mixSelection() {
@@ -494,34 +470,15 @@ function mixSelection() {
   return { mode: form.get("mix-mode"), direction: form.get("mix-direction"), sections };
 }
 
-function mixBuckets({ mode, direction, sections }) {
-  const now = new Date();
-  const oldestMiss = now.getTime() - missedReviewDays * dayMilliseconds;
-  const includes = mode === "missed"
-    ? review => review?.step === 0 && Date.parse(review.reviewedAt) >= oldestMiss
-    : review => mode === "shuffle" || isDue(review, now);
-  const buckets = [];
-  for (const deck of data.decks) {
-    if (!sections.has(deck.category)) continue;
-    const cards = [];
-    deck.cards.forEach((card, cardIndex) => {
-      const review = card[reviewField(practiceDirection(card, direction))];
-      if (includes(review)) cards.push({ deckId: deck.id, cardIndex, dueAt: review?.dueAt });
-    });
-    if (cards.length) buckets.push({ deck, cards });
-  }
-  return buckets;
-}
-
 function updateMixStatus() {
   const settings = mixSelection();
-  const count = mixBuckets(settings).reduce((total, bucket) => total + bucket.cards.length, 0);
-  const size = settings.mode === "missed" ? count : Math.min(count, mixSize);
+  const count = reviewBuckets(data.decks, settings, Date.now()).reduce((total, bucket) => total + bucket.cards.length, 0);
+  const size = settings.mode === "missed" ? count : Math.min(count, MIX_SIZE);
   $("start-mix").disabled = !size;
   let status = size + (size === 1 ? " card in this review" : " cards in this review");
   if (!settings.sections.size) status = "Select at least one section.";
   else if (!size) status = mixModes[settings.mode].empty;
-  else if (settings.mode === "missed") status = size + (size === 1 ? " card" : " cards") + " to retry from the last " + missedReviewDays + " days";
+  else if (settings.mode === "missed") status = size + (size === 1 ? " card" : " cards") + " to retry from the last " + MISSED_DAYS + " days";
   $("mix-status").textContent = status;
 }
 
@@ -543,29 +500,6 @@ function openMix() {
   $("mix-form").elements["mix-direction"].value = front;
   updateMixStatus();
   $("mix-dialog").showModal();
-}
-
-function interleave(settings) {
-  const buckets = shuffleItems(mixBuckets(settings));
-  for (const { cards } of buckets) {
-    shuffleItems(cards);
-    if (settings.mode === "due") {
-      // Pop the longest-overdue card from each deck first. Shuffling breaks ties.
-      cards.sort((a, b) => Date.parse(b.dueAt) - Date.parse(a.dueAt));
-    }
-  }
-  const cards = [];
-  let previousDeck;
-  while (buckets.length && (settings.mode === "missed" || cards.length < mixSize)) {
-    const otherSection = buckets.findIndex(({ deck }) => deck.category !== previousDeck?.category);
-    const otherDeck = buckets.findIndex(({ deck }) => deck !== previousDeck);
-    const index = otherSection >= 0 ? otherSection : Math.max(otherDeck, 0);
-    const [bucket] = buckets.splice(index, 1);
-    cards.push(bucket.cards.pop());
-    if (bucket.cards.length) buckets.push(bucket);
-    previousDeck = bucket.deck;
-  }
-  return cards;
 }
 
 function showMessage(title, detail, button, action) {
@@ -648,15 +582,16 @@ function renderCard() {
   $("card-source").hidden = !round.mix;
   $("card-source").textContent = round.mix ? deck.category + " · " + deck.name : "";
   const question = isExercise(card);
-  const firstSide = question ? "fr" : front;
-  const side = round.revealed ? (firstSide === "fr" ? "en" : "fr") : firstSide;
+  const primarySide = firstSide(question ? "exercise" : front);
+  const side = round.revealed ? (primarySide === "front" ? "back" : "front") : primarySide;
+  const text = cardText(card, side);
   const sideLabel = question ? (round.revealed ? "Answer" : "Question") : languageName(cardLanguage(deck, side));
   const typeLabel = cardLabels[card.kind];
   $("card-language").textContent = typeLabel ? typeLabel + " · " + sideLabel : sideLabel;
   $("term").lang = card.kind === "grammar" ? "en" : cardLanguage(deck, side);
   if (round.mix) $("direction").textContent = directionName(front, deck);
-  $("term").textContent = card[side];
-  $("card").classList.toggle("long-card", question || card[side].length > 70);
+  $("term").textContent = text;
+  $("card").classList.toggle("long-card", question || text.length > 70);
   $("card").classList.toggle("revealed", round.revealed);
   $("mobile-flip-hint").textContent = round.revealed ? "Swipe or tap a grade" : "Tap to reveal · Hold to flag";
   $("position").textContent = "Card " + (round.index + 1) + " of " + round.cards.length;
@@ -670,85 +605,61 @@ function renderCard() {
 
 function flip() {
   if (saving) return;
-  round.revealed = !round.revealed;
-  if (round.revealed) round.graded = true;
+  flipRound(round);
   renderCard();
 }
 
 function skipCard() {
-  if (saving) return;
-  if (round.index >= round.cards.length - 1) return;
-  const [entry] = round.cards.splice(round.index, 1);
-  round.cards.push(entry);
-  round.revealed = false;
-  round.graded = false;
+  if (saving || !skipRound(round)) return;
   renderCard();
   $("card").focus();
 }
 
-async function saveScoreChange(deck, cardIndex, correct, delta, direction) {
-  try {
-    const card = deck.cards[cardIndex];
-    const operations = delta > 0 ? [{ type: 'answer', payload: {
-      deckId: deck.id, cardId: card.id, direction, correct, sessionId: round.id,
-      mode: round.mix ?? (round.shuffle ? 'shuffled' : 'deck')
-    } }] : [{ type: 'answer.undo', payload: { answerId: round.lastGrade.eventId } }];
-    const events = await studyStore.commit(operations);
-    if (delta > 0) lastSavedAnswerId = events[0].id;
-    data = studyStore.library;
-    return true;
-  } catch (error) { notice(error.message); return false; }
-}
-async function grade(correct) {
-  if (saving) return;
-  const entry = round.cards[round.index];
-  if (!entry || !round.graded) return;
-  const deck = findDeck(entry.deckId);
-  const card = cardFor(entry);
-  if (!card) return;
-  saving = true;
-  const direction = practiceDirection(card, front);
-  if (!await saveScoreChange(deck, entry.cardIndex, correct, 1, direction)) {
-    saving = false;
-    notice("Your answer could not be saved. Allow browser storage, then try again.");
-    return;
-  }
-  saving = false;
-  notice("");
-  round.index++;
-  round.correct += Number(correct);
-  round.lastGrade = {
-    correct, direction, eventId: lastSavedAnswerId
+async function saveRoundChange(run) {
+  if (saving || !studyStore || !round) return;
+  const store = studyStore;
+  const activeRound = round;
+  const generation = store.generation;
+  const isCurrent = () => studyStore === store && round === activeRound && store.generation === generation;
+  const persist = async operation => {
+    const [event] = await store.commit([operation], { generation });
+    return event;
   };
-  round.revealed = false;
-  round.graded = false;
-  render();
+  const status = { isCurrent, persist };
+  saving = true;
+  try {
+    return await run(activeRound, status);
+  } catch (error) {
+    if (isCurrent()) notice(error.message);
+  } finally {
+    saving = false;
+    if (studyStore === store) {
+      data = store.library;
+      if (round) render();
+    }
+  }
+}
+
+async function grade(correct) {
+  const entry = round?.cards[round.index];
+  const card = entry && cardFor(entry);
+  if (!card) return;
+  const direction = practiceDirection(card, front);
+  const graded = await saveRoundChange((activeRound, status) =>
+    gradeRound(activeRound, { correct, direction, ...status }));
+  if (!graded) return;
+  notice("");
   $(round.index === round.cards.length ? "message-action" : "card").focus();
 }
 
 async function undoGrade() {
-  if (saving) return;
-  const lastGrade = round.lastGrade;
-  if (!lastGrade) return;
-  const entry = round.cards[round.index - 1];
-  const deck = findDeck(entry.deckId);
-  const { correct, direction } = lastGrade;
-  cardFor(entry);
-  saving = true;
-  if (!await saveScoreChange(deck, entry.cardIndex, correct, -1, direction)) {
-    saving = false;
-    notice("Undo could not be saved. Allow browser storage, then try again.");
-    return;
-  }
-  saving = false;
+  const direction = await saveRoundChange(async (activeRound, status) => {
+    const restoredDirection = await undoRound(activeRound, status);
+    if (restoredDirection && restoredDirection !== "exercise") front = restoredDirection;
+    return restoredDirection;
+  });
+  if (!direction) return;
   notice("");
-  round.index--;
-  round.correct -= Number(correct);
-  round.lastGrade = null;
-  if (direction !== "exercise") front = direction;
-  round.revealed = true;
-  round.graded = true;
-  render();
   $("card").focus();
 }
 
@@ -885,10 +796,11 @@ $("backup-file").onchange = async event => {
     return;
   }
   if (data.decks.length && !window.confirm("Replace the synced library on all your devices with this backup? Export a backup first to keep the current results.")) return;
-  if (!await studyStore.importLibrary(imported)) {
-    notice("The backup could not be saved. Allow browser storage, then try again.");
-    return;
-  }
+  const store = studyStore;
+  if (!store) return;
+  try { await store.importLibrary(imported); }
+  catch (error) { if (studyStore === store) notice(error.message); return; }
+  if (studyStore !== store) return;
   deckId = data.decks[0]?.id;
   notice("");
   startRound();
@@ -924,8 +836,7 @@ $("flag-form").addEventListener("submit", async event => {
     direction: entry.direction,
     note: $("flag-note").value.trim()
   };
-  const flags = [flag, ...(card.flags ?? []).filter(item => item.id !== flag.id)];
-  if (!await saveCardUpdate(entry, { ...card, flags })) {
+  if (!await saveCardOperations(() => [upsertFlag(data, entry, flag)])) {
     flagError("flag-error", "Your flag could not be saved. Allow browser storage, then try again.");
     return;
   }
@@ -933,25 +844,60 @@ $("flag-form").addEventListener("submit", async event => {
   render();
   $("card").focus();
 });
+function updateSplitPreview() {
+  const additional = $("split-fields").childElementCount;
+  $("fix-reset").disabled = Boolean(additional);
+  $("split-preview").hidden = !additional;
+  $("split-preview").textContent = additional
+    ? (additional + 1) + " cards with fresh review schedules. Past scores and sessions stay in your history."
+    : "";
+}
+
+$("add-split-card").onclick = () => {
+  const entry = fixingEntry;
+  const deck = findDeck(entry.deckId);
+  const exercise = isExercise(cardFor(entry));
+  const field = make("fieldset", "split-card", "");
+  field.append(make("legend", "", "Additional card " + ($("split-fields").childElementCount + 1)));
+  for (const side of ["front", "back"]) {
+    const label = make("label", "field", exercise ? (side === "front" ? "Question" : "Answer") : languageName(cardLanguage(deck, side)));
+    const input = document.createElement("textarea");
+    input.dataset.side = side;
+    input.required = true;
+    input.maxLength = 500;
+    label.append(input);
+    field.append(label);
+  }
+  const remove = make("button", "button", "Remove additional card");
+  remove.type = "button";
+  remove.onclick = () => { field.remove(); updateSplitPreview(); };
+  field.append(remove);
+  $("split-fields").append(field);
+  updateSplitPreview();
+  field.querySelector("textarea").focus();
+};
+
 $("fix-form").addEventListener("submit", async event => {
   event.preventDefault();
   const entry = fixingEntry;
-  const card = cardFor(entry);
-  const fr = $("fix-front").value.trim();
-  const en = $("fix-back").value.trim();
-  if (!fr || !en) return flagError("fix-error", "Fill in both sides of the card.");
-  const changed = fr !== card.fr || en !== card.en;
-  const flags = card.flags.map(flag => flag.id === entry.flagId
-    ? { ...flag, resolvedAt: new Date().toISOString(), revision: { fr, en } } : flag);
-  const updated = { ...card, fr, en, flags };
-  if (changed && $("fix-reset").checked) {
-    delete updated.review;
-    delete updated.recallReview;
+  const first = { front: $("fix-front").value.trim(), back: $("fix-back").value.trim() };
+  const additional = Array.from($("split-fields").children, field => ({
+    front: field.querySelector('[data-side="front"]').value.trim(),
+    back: field.querySelector('[data-side="back"]').value.trim()
+  }));
+  if ([first, ...additional].some(card => !card.front || !card.back)) {
+    return flagError("fix-error", "Fill in both sides of each card.");
   }
-  if (!await saveCardUpdate(entry, updated)) {
-    flagError("fix-error", "The card could not be saved. Allow browser storage, then try again.");
-    return;
-  }
+  const current = cardFor(entry);
+  if (!current) return flagError("fix-error", "This card has been removed. Reopen the deck to get the current cards.");
+  const changed = Boolean(additional.length || first.front !== cardText(current, "front") || first.back !== cardText(current, "back"));
+  const saved = await saveCardOperations(() => {
+    const rewrite = additional.length
+      ? splitCard(data, entry, [first, ...additional], { uuid: () => crypto.randomUUID() }).operations
+      : rewriteCard(data, entry, first, { resetReview: changed && $("fix-reset").checked });
+    return [...rewrite, resolveFlag(data, entry, entry.flagId, new Date().toISOString(), first)];
+  });
+  if (!saved) return flagError("fix-error", "Could not save the card changes. Reopen the card and try again.");
   $("fix-dialog").close();
   if (changed) {
     deckId = entry.deckId;
@@ -972,7 +918,7 @@ $("mix-form").addEventListener("change", updateMixStatus);
 $("mix-form").addEventListener("submit", async event => {
   event.preventDefault();
   const settings = mixSelection();
-  const cards = interleave(settings);
+  const cards = selectReview(data.decks, settings);
   if (!cards.length) {
     updateMixStatus();
     return;
@@ -1004,8 +950,7 @@ $("shuffle").onclick = () => {
 $("direction").onclick = () => {
   $("mobile-study-options").close();
   front = front === "fr" ? "en" : "fr";
-  round.revealed = false;
-  round.graded = false;
+  resetFace(round);
   render();
   if (!$("review").hidden) $("card").focus();
 };
@@ -1081,12 +1026,14 @@ document.addEventListener("visibilitychange", cancelCardGesture);
 setInterval(refreshReviews, 30_000);
 
 function applyCloudLibrary(library) {
+  const generationChanged = activeGeneration !== studyStore?.generation;
+  activeGeneration = studyStore?.generation;
   const previousDeckId = deckId;
   const current = round?.cards[round.index];
   const previousCard = current ? cardFor(current) : null;
   data = library;
   if (!findDeck()) deckId = data.decks[0]?.id;
-  if (!round || previousDeckId !== deckId || (!round.cards.length && findDeck()?.cards.length)) {
+  if (!round || generationChanged || previousDeckId !== deckId || (!round.cards.length && findDeck()?.cards.length)) {
     startRound();
     return;
   }
@@ -1094,8 +1041,7 @@ function applyCloudLibrary(library) {
   if (current && !currentCard) { startRound(); return; }
   round.cards = [...round.cards.slice(0, round.index), ...round.cards.slice(round.index).filter(entry => cardFor(entry))];
   if (previousCard && currentCard && (previousCard.fr !== currentCard.fr || previousCard.en !== currentCard.en)) {
-    round.revealed = false;
-    round.graded = false;
+    resetFace(round);
   }
   if (!saving && !document.querySelector('dialog[open]')) render();
 }
@@ -1103,12 +1049,14 @@ function applyCloudLibrary(library) {
 await startCloud({
   onStore(store) {
     studyStore = store; data = store.library; deckId = data.decks[0]?.id;
+    activeGeneration = store.generation;
     placeStudyControls();
     startRound();
   },
   onLibrary: applyCloudLibrary,
   onSignOut() {
     studyStore = null; data = { version: currentVersion, decks: [] }; round = null;
+    activeGeneration = undefined;
     $('library').replaceChildren(); $('term').textContent = '';
     for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
     $('study-app').hidden = true;

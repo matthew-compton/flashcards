@@ -1,8 +1,25 @@
 const CACHE = 'french-flashcards-shell-__BUILD_REVISION__';
 const SHELL = ['./', './index.html', './__APP_SCRIPT__', './icon.png', './manifest.webmanifest'];
 
+async function installShell() {
+  const requests = SHELL.map(asset => new Request(new URL(asset, self.registration.scope), { cache: 'reload' }));
+  try {
+    const cache = await caches.open(CACHE);
+    await cache.addAll(requests);
+    for (const request of requests.slice(0, 2)) {
+      const page = await cache.match(request);
+      if (!page || !(await page.text()).includes('src="./__APP_SCRIPT__"')) {
+        throw new Error('The app update contains assets from different releases.');
+      }
+    }
+  } catch (error) {
+    await caches.delete(CACHE);
+    throw error;
+  }
+}
+
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL.map(url => new Request(url, { cache: 'reload' })))));
+  event.waitUntil(installShell());
   // A replacement waits for the old app's windows to close, preserving active rounds.
 });
 

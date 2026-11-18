@@ -7,3 +7,5 @@ private/
 *.backup.json
 *.sqlite
 playwright-report/
+test-results/
+supabase/.temp/

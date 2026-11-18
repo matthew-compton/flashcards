@@ -1,26 +1,7 @@
 import { normalizeLegacy } from './legacy.js';
 
-export const DAY = 86_400_000;
-const intervals = [1, 7, 14, 30, 60, 60, 60];
-
-export function isExercise(card) {
-  return card.kind === 'grammar' || card.kind === 'conjugation';
-}
-
-export function reviewField(direction) {
-  return direction === 'en' ? 'recallReview' : 'review';
-}
-
-export function nextReview(previous, correct, at) {
-  const now = Date.parse(at);
-  let step = 0;
-  if (correct) {
-    const oldStep = previous?.step ?? 0;
-    const advance = oldStep === 0 || Date.parse(previous.dueAt) <= now;
-    step = Math.min(oldStep + Number(advance), intervals.length - 1);
-  }
-  return { step, reviewedAt: at, dueAt: new Date(now + intervals[step] * DAY).toISOString() };
-}
+import { nextReview, reviewField } from './review.js';
+export { DAY, isExercise, nextReview, reviewField } from './review.js';
 
 export function prepareLibrary(input) {
   const library = normalizeLegacy(input);
@@ -56,7 +37,8 @@ function applyFields(target, fields) {
   }
 }
 
-function applyAnswer(deck, card, event) {
+function applyAnswer(state, card, event) {
+  const { deck } = state;
   const { correct, direction, sessionId, mode } = event.payload;
   deck.attempts += 1;
   deck.correct += Number(correct);
@@ -66,14 +48,34 @@ function applyAnswer(deck, card, event) {
   if (!previous || Date.parse(event.at) >= Date.parse(previous.reviewedAt)) {
     card[field] = nextReview(previous, correct, event.at);
   }
-  const sessions = deck.sessions ?? [];
-  const old = sessions.find(session => session.id === sessionId && session.direction === direction);
-  const updated = {
+  if (!state.sessions) {
+    const rows = (deck.sessions ?? []).map((session, index) => ({ session, sequence: -index - 1 }));
+    const byKey = new Map();
+    for (const row of rows) {
+      const key = JSON.stringify([row.session.id, row.session.direction]);
+      if (!byKey.has(key)) byKey.set(key, row);
+    }
+    state.sessions = { rows, byKey, nextSequence: 0 };
+  }
+  const { rows, byKey } = state.sessions;
+  const key = JSON.stringify([sessionId, direction]);
+  let row = byKey.get(key);
+  const old = row?.session;
+  if (!row) {
+    row = {};
+    rows.push(row);
+    byKey.set(key, row);
+  }
+  row.session = {
     id: sessionId, direction, mode, checkedAt: event.at,
     attempts: (old?.attempts ?? 0) + 1,
     correct: (old?.correct ?? 0) + Number(correct)
   };
-  deck.sessions = [updated, ...sessions.filter(session => session !== old)].sort(newestFirst);
+  row.sequence = state.sessions.nextSequence++;
+}
+
+function indexDeck(deck) {
+  return { deck, cards: new Map(deck.cards.map(card => [card.id, card])) };
 }
 
 // Replaying immutable events makes retries idempotent and lets offline answers merge.
@@ -90,32 +92,43 @@ export function materialize(records) {
   }
   if (!baseline) return { library: { version: 11, decks: [] }, generation: null };
   const library = structuredClone(baseline.payload.library);
+  const decks = new Map(library.decks.map(deck => [deck.id, indexDeck(deck)]));
   const events = ordered.map(record => record.event).filter(event => event.generation === baseline.id && event !== baseline);
   const reversed = new Set(events.filter(event => event.type === 'answer.undo').map(event => event.payload.answerId));
   events.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id.localeCompare(b.id));
   for (const event of events) {
     const payload = event.payload;
     if (event.type === 'deck.add') {
-      if (!library.decks.some(deck => deck.id === payload.deck.id)) library.decks.push(structuredClone(payload.deck));
+      if (!decks.has(payload.deck.id)) {
+        const deck = structuredClone(payload.deck);
+        library.decks.push(deck);
+        decks.set(deck.id, indexDeck(deck));
+      }
       continue;
     }
-    const deck = library.decks.find(item => item.id === payload.deckId);
-    if (!deck) continue;
+    const state = decks.get(payload.deckId);
+    if (!state) continue;
+    const { deck, cards } = state;
     if (event.type === 'deck.edit') {
       applyFields(deck, payload.fields);
       continue;
     }
     if (event.type === 'card.add') {
-      if (!deck.cards.some(card => card.id === payload.card.id)) deck.cards.push(structuredClone(payload.card));
+      if (!cards.has(payload.card.id)) {
+        const card = structuredClone(payload.card);
+        deck.cards.push(card);
+        cards.set(card.id, card);
+      }
       continue;
     }
     if (event.type === 'card.remove') {
       deck.cards = deck.cards.filter(card => card.id !== payload.cardId);
+      cards.delete(payload.cardId);
       continue;
     }
-    const card = deck.cards.find(item => item.id === payload.cardId);
+    const card = cards.get(payload.cardId);
     if (!card) continue;
-    if (event.type === 'answer' && !reversed.has(event.id)) applyAnswer(deck, card, event);
+    if (event.type === 'answer' && !reversed.has(event.id)) applyAnswer(state, card, event);
     if (event.type === 'card.edit') {
       applyFields(card, payload.fields);
       if (payload.resetReview) {
@@ -124,6 +137,11 @@ export function materialize(records) {
       }
     }
     if (event.type === 'flag.upsert') upsertFlag(card, structuredClone(payload.flag));
+  }
+  for (const { deck, sessions } of decks.values()) {
+    if (sessions) deck.sessions = sessions.rows
+      .sort((a, b) => newestFirst(a.session, b.session) || b.sequence - a.sequence)
+      .map(row => row.session);
   }
   return { library, generation: baseline.id };
 }
