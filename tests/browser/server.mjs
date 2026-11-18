@@ -21,6 +21,7 @@ for (const release of ['v1', 'v2']) {
 }
 
 let release = 'v1';
+let bundleUnavailable = false;
 const streams = new Map();
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript',
   '.webmanifest': 'application/manifest+json', '.png': 'image/png' };
@@ -29,6 +30,7 @@ const server = http.createServer(async (request, response) => {
   try {
     if (request.method === 'POST' && url.pathname === '/test-release' && builds.has(url.searchParams.get('version'))) {
       release = url.searchParams.get('version');
+      bundleUnavailable = url.searchParams.get('bundle') === 'unavailable';
       return response.writeHead(204).end();
     }
     if (request.method === 'POST' && url.pathname === '/test-sync') {
@@ -48,6 +50,7 @@ const server = http.createServer(async (request, response) => {
     if (!/^\/flashcards\/(?:index\.html|sw\.js|app\.[a-f0-9]+\.js|manifest\.webmanifest|icon\.png)?$/.test(url.pathname)) {
       return response.writeHead(404).end();
     }
+    if (bundleUnavailable && /^app\.[a-f0-9]+\.js$/.test(file)) return response.writeHead(503).end();
     const data = await readFile(path.join(builds.get(release), file));
     return response.writeHead(200, { 'Content-Type': contentTypes[path.extname(file)], 'Cache-Control': 'no-store' }).end(data);
   } catch {

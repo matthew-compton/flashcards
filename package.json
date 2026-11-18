@@ -9,6 +9,7 @@
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/*.js tests/*.test.js",
     "test:db": "node --test tests/database/*.test.js",
     "test:browser": "playwright test",
+    "publish:check": "node scripts/check-publish.mjs",
     "bench:replay": "node scripts/bench-replay.mjs",
     "start": "node scripts/serve.mjs"
   },

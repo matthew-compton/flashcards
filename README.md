@@ -6,6 +6,8 @@ The public GitHub Pages site contains the interface and application code. Course
 
 ## Development
 
+Use Node.js 22 to match GitHub Actions.
+
 ```sh
 npm ci
 cp .env.example .env
@@ -29,9 +31,13 @@ Pull requests and Pages deployments run the quality workflow. The database and b
 
 GitHub Pages publishes `.github/workflows/pages.yml` after pushes to `main`. Set repository variables `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`. Keep the project's Supabase GitHub integration linked to this repository's `main` branch, working directory `.`. SQL migrations are in `supabase/migrations/`.
 
+Run `npm run publish:check` to check whether the current command session can push the checked-out commit to `origin/main`. It uses a dry run with credential prompts disabled. A public clone or fetch can succeed even when the session cannot push.
+
+In Windows Codex, use host approval for the publish check and for an authorized push. The host process can use the existing Windows GitHub CLI credential helper. Ordinary development commands can stay in the sandbox. After pushing, check that the Pages workflow deploys the pushed commit.
+
 In Supabase Authentication URL Configuration, set the Site URL to `https://matthew-compton.github.io/flashcards/` and allow that exact redirect URL. Add `http://127.0.0.1:8797/` when testing locally. Email link sign-in is enabled through Supabase's email provider.
 
-The manifest and service worker cache the app interface for offline use. The service worker only handles the listed same-origin app assets. Signed-in libraries and unsynced events live in a separate, account-scoped IndexedDB cache. Opening or refreshing the app syncs saved progress when online. Settings has a manual **Sync now** button and shows any changes still saved on the current device.
+Opening or refreshing the app online checks for the latest complete app build. The service worker caches the interface and its matching JavaScript bundle for offline use. Signed-in libraries and unsynced events live in a separate, account-scoped IndexedDB cache. Opening or refreshing also syncs saved progress when online. Settings has a manual **Sync now** button and shows any changes still saved on the current device.
 
 ## Moving existing progress
 
