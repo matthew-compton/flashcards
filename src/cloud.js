@@ -7,6 +7,7 @@ const publicKey = __SUPABASE_PUBLISHABLE_KEY__;
 const $ = id => document.getElementById(id);
 
 export async function startCloud({ onStore, onLibrary, onSignOut }) {
+  $('export').hidden = $('import').hidden = true;
   receiveMigration();
   if (!projectUrl || !publicKey) {
     $('auth-message').textContent = 'The cloud connection has not been configured for this build.';
@@ -23,10 +24,10 @@ export async function startCloud({ onStore, onLibrary, onSignOut }) {
 
   async function transferProgress() {
     if (!activeStore || migrating || activeStore.status !== 'Synced') return;
-    const library = stagedMigration();
-    if (!library) return;
     migrating = true;
     try {
+      const library = stagedMigration();
+      if (!library) return;
       const sourceHash = await migrationHash(library);
       const migrated = activeStore.records.some(record => record.event.payload?.sourceHash === sourceHash);
       if (migrated) { clearMigration(); return; }
@@ -58,6 +59,8 @@ export async function startCloud({ onStore, onLibrary, onSignOut }) {
     $('study-app').hidden = true;
     $('auth-panel').hidden = Boolean(user);
     $('sign-out').hidden = $('sync-now').hidden = !user;
+    $('export').hidden = $('import').hidden = !user;
+    $('sign-out').title = user?.email ? 'Signed in as ' + user.email : 'Sign out';
     $('export').disabled = $('import').disabled = !user;
     if (!user) {
       localStorage.removeItem('flashcards-last-account');
