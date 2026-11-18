@@ -1,5 +1,6 @@
 import { prepareLibrary } from "./model.js";
 import { startCloud } from "./cloud.js";
+import { bindCardSwipe } from "./swipe.js";
 "use strict";
 
 const storageKey = "french-flashcards-course-v3";
@@ -441,6 +442,7 @@ function renderLibrary(groups) {
       score.append(sessionRate, checked);
       button.append(label, score);
       button.addEventListener("click", () => {
+        $("mobile-decks").close();
         if (!round.mix && deckId === deck.id) return;
         deckId = deck.id;
         startRound();
@@ -574,6 +576,7 @@ function showMessage(title, detail, button, action) {
 }
 
 function render() {
+  cancelSwipe();
   refreshFlagCount();
   const groups = categories();
   renderLibrary(groups);
@@ -635,11 +638,12 @@ function render() {
 }
 
 function renderCard() {
+  cancelSwipe();
   const entry = round.cards[round.index];
   const deck = findDeck(entry.deckId);
   const card = cardFor(entry);
   const flagged = card.flags?.some(flag => !flag.resolvedAt && flag.direction === practiceDirection(card, front));
-  $("flag-card").textContent = flagged ? "Flagged (F)" : "Flag card (F)";
+  $("flag-card").textContent = flagged ? "Flagged" : "Flag card";
   $("flag-card").classList.toggle("flagged", Boolean(flagged));
   $("card-source").hidden = !round.mix;
   $("card-source").textContent = round.mix ? deck.category + " · " + deck.name : "";
@@ -654,6 +658,7 @@ function renderCard() {
   $("term").textContent = card[side];
   $("card").classList.toggle("long-card", question || card[side].length > 70);
   $("card").classList.toggle("revealed", round.revealed);
+  $("mobile-flip-hint").textContent = round.revealed ? "Swipe or tap a grade" : "Tap to reveal";
   $("position").textContent = "Card " + (round.index + 1) + " of " + round.cards.length;
   $("round-score").textContent = round.correct + " correct this round";
   $("progress").max = round.cards.length;
@@ -888,10 +893,17 @@ $("backup-file").onchange = async event => {
   notice("");
   startRound();
 };
-$("new-deck").onclick = () => openEditor();
-$("flag-card").onclick = openCardFlag;
+$("new-deck").onclick = () => {
+  $("mobile-decks").close();
+  openEditor();
+};
+$("flag-card").onclick = () => {
+  $("mobile-study-options").close();
+  openCardFlag();
+};
 $("close-flag").onclick = () => $("flag-dialog").close();
 $("open-flags").onclick = () => {
+  $("mobile-decks").close();
   flagError("flags-error");
   renderFlagList();
   $("flags-dialog").showModal();
@@ -947,8 +959,14 @@ $("fix-form").addEventListener("submit", async event => {
   } else render();
   renderFlagList();
 });
-$("edit-deck").onclick = () => openEditor(findDeck());
-$("open-mix").onclick = openMix;
+$("edit-deck").onclick = () => {
+  $("mobile-study-options").close();
+  openEditor(findDeck());
+};
+$("open-mix").onclick = () => {
+  $("mobile-decks").close();
+  openMix();
+};
 $("close-mix").onclick = () => $("mix-dialog").close();
 $("mix-form").addEventListener("change", updateMixStatus);
 $("mix-form").addEventListener("submit", async event => {
@@ -969,17 +987,22 @@ $("mix-form").addEventListener("submit", async event => {
 $("add-card").onclick = () => addCardFields(undefined, true);
 $("close-editor").onclick = () => $("editor").close();
 $("card").onclick = flip;
-$("open-history").onclick = openHistory;
+$("open-history").onclick = () => {
+  $("mobile-study-options").close();
+  openHistory();
+};
 $("close-history").onclick = () => $("history-dialog").close();
 $("incorrect").onclick = () => grade(false);
 $("correct").onclick = () => grade(true);
 $("skip").onclick = skipCard;
 $("undo").onclick = undoGrade;
 $("shuffle").onclick = () => {
+  $("mobile-study-options").close();
   startRound(true);
   $("card").focus();
 };
 $("direction").onclick = () => {
+  $("mobile-study-options").close();
   front = front === "fr" ? "en" : "fr";
   round.revealed = false;
   round.graded = false;
@@ -1012,6 +1035,39 @@ document.addEventListener("keydown", event => {
   }
 });
 
+const mobileStudy = window.matchMedia("(max-width: 760px)");
+const movableControls = [
+  [$("deck-library"), $("mobile-decks")],
+  [$("flag-card"), $("mobile-card-actions")],
+  [$("study-actions"), $("mobile-deck-controls")],
+  [$("stats"), $("mobile-deck-controls")],
+  [$("account-actions"), $("mobile-account-controls")]
+].map(([element, mobileContainer]) => {
+  const desktopPosition = document.createComment(element.id);
+  element.before(desktopPosition);
+  return { element, mobileContainer, desktopPosition };
+});
+function placeStudyControls() {
+  cancelSwipe();
+  $("mobile-decks").close();
+  $("mobile-study-options").close();
+  for (const { element, mobileContainer, desktopPosition } of movableControls) {
+    // Keep the sign-in view's controls in the ordinary app header.
+    if (mobileStudy.matches && !$("study-app").hidden) mobileContainer.append(element);
+    else desktopPosition.after(element);
+  }
+}
+const cancelSwipe = bindCardSwipe({
+  card: $("card"), stage: $("card-stage"), feedback: $("swipe-feedback"), grade,
+  getEntry: () => mobileStudy.matches && !saving && round?.revealed && !$("review").hidden &&
+    !document.querySelector("dialog[open]") ? round.cards[round.index] : null
+});
+mobileStudy.addEventListener("change", placeStudyControls);
+$("show-decks").onclick = () => { if (!saving) $("mobile-decks").showModal(); };
+$("show-study-options").onclick = () => { if (!saving) $("mobile-study-options").showModal(); };
+$("close-mobile-decks").onclick = () => $("mobile-decks").close();
+$("close-mobile-options").onclick = () => $("mobile-study-options").close();
+
 // Account loading starts the first round.
 
 function refreshReviews() {
@@ -1020,6 +1076,7 @@ function refreshReviews() {
 }
 
 document.addEventListener("visibilitychange", refreshReviews);
+document.addEventListener("visibilitychange", cancelSwipe);
 setInterval(refreshReviews, 30_000);
 
 function applyCloudLibrary(library) {
@@ -1043,11 +1100,17 @@ function applyCloudLibrary(library) {
 }
 
 await startCloud({
-  onStore(store) { studyStore = store; data = store.library; deckId = data.decks[0]?.id; startRound(); },
+  onStore(store) {
+    studyStore = store; data = store.library; deckId = data.decks[0]?.id;
+    placeStudyControls();
+    startRound();
+  },
   onLibrary: applyCloudLibrary,
   onSignOut() {
     studyStore = null; data = { version: currentVersion, decks: [] }; round = null;
     $('library').replaceChildren(); $('term').textContent = '';
     for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
+    $('study-app').hidden = true;
+    placeStudyControls();
   }
 });
