@@ -1,6 +1,6 @@
 import { prepareLibrary } from "./model.js";
 import { startCloud } from "./cloud.js";
-import { bindCardSwipe } from "./swipe.js";
+import { bindCardGestures } from "./swipe.js";
 "use strict";
 
 const storageKey = "french-flashcards-course-v3";
@@ -576,7 +576,7 @@ function showMessage(title, detail, button, action) {
 }
 
 function render() {
-  cancelSwipe();
+  cancelCardGesture();
   refreshFlagCount();
   const groups = categories();
   renderLibrary(groups);
@@ -638,7 +638,7 @@ function render() {
 }
 
 function renderCard() {
-  cancelSwipe();
+  cancelCardGesture();
   const entry = round.cards[round.index];
   const deck = findDeck(entry.deckId);
   const card = cardFor(entry);
@@ -658,7 +658,7 @@ function renderCard() {
   $("term").textContent = card[side];
   $("card").classList.toggle("long-card", question || card[side].length > 70);
   $("card").classList.toggle("revealed", round.revealed);
-  $("mobile-flip-hint").textContent = round.revealed ? "Swipe or tap a grade" : "Tap to reveal";
+  $("mobile-flip-hint").textContent = round.revealed ? "Swipe or tap a grade" : "Tap to reveal · Hold to flag";
   $("position").textContent = "Card " + (round.index + 1) + " of " + round.cards.length;
   $("round-score").textContent = round.correct + " correct this round";
   $("progress").max = round.cards.length;
@@ -1048,7 +1048,7 @@ const movableControls = [
   return { element, mobileContainer, desktopPosition };
 });
 function placeStudyControls() {
-  cancelSwipe();
+  cancelCardGesture();
   $("mobile-decks").close();
   $("mobile-study-options").close();
   for (const { element, mobileContainer, desktopPosition } of movableControls) {
@@ -1057,10 +1057,11 @@ function placeStudyControls() {
     else desktopPosition.after(element);
   }
 }
-const cancelSwipe = bindCardSwipe({
-  card: $("card"), stage: $("card-stage"), feedback: $("swipe-feedback"), grade,
-  getEntry: () => mobileStudy.matches && !saving && round?.revealed && !$("review").hidden &&
-    !document.querySelector("dialog[open]") ? round.cards[round.index] : null
+const cancelCardGesture = bindCardGestures({
+  card: $("card"), stage: $("card-stage"), feedback: $("swipe-feedback"), grade, flag: openCardFlag,
+  getEntry: () => mobileStudy.matches && !saving && round && !$("review").hidden &&
+    !document.querySelector("dialog[open]") ? round.cards[round.index] : null,
+  isRevealed: () => Boolean(round?.revealed)
 });
 mobileStudy.addEventListener("change", placeStudyControls);
 $("show-decks").onclick = () => { if (!saving) $("mobile-decks").showModal(); };
@@ -1076,7 +1077,7 @@ function refreshReviews() {
 }
 
 document.addEventListener("visibilitychange", refreshReviews);
-document.addEventListener("visibilitychange", cancelSwipe);
+document.addEventListener("visibilitychange", cancelCardGesture);
 setInterval(refreshReviews, 30_000);
 
 function applyCloudLibrary(library) {

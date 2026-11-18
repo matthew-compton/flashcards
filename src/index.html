@@ -173,7 +173,7 @@ form { display: grid; gap: 12px; }
   #mobile-deck-controls .stats { margin: 14px 0 0; gap: 8px; }
   #mobile-account-controls { padding-top: 12px; border-top: 1px solid var(--line); }
   .sidebar-heading { margin-bottom: 12px; }
-  .card { min-height: clamp(204px, calc(100dvh - 280px), 540px); padding: 16px; touch-action: pan-y pinch-zoom; }
+  .card { min-height: clamp(204px, calc(100dvh - 280px), 540px); padding: 16px; touch-action: pan-y pinch-zoom; -webkit-touch-callout: none; user-select: none; }
   .grades { margin-top: 14px; gap: 8px; }
   .undo-actions { justify-content: space-between; margin-top: 8px; }
   .undo-actions #undo:only-child { margin-left: auto; }
@@ -252,7 +252,7 @@ form { display: grid; gap: 12px; }
           <span id="card-language" class="card-language"></span>
           <span id="term" class="term"></span>
           <span class="flip-hint desktop-flip-hint">Click or press Space to flip</span>
-          <span id="mobile-flip-hint" class="flip-hint mobile-flip-hint">Tap to reveal</span>
+          <span id="mobile-flip-hint" class="flip-hint mobile-flip-hint">Tap to reveal · Hold to flag</span>
           <span id="swipe-feedback" class="swipe-feedback" aria-hidden="true" hidden></span>
         </button>
       </div>
