@@ -7,6 +7,11 @@ const projectUrl = __SUPABASE_URL__;
 const publicKey = __SUPABASE_PUBLISHABLE_KEY__;
 const $ = id => document.getElementById(id);
 
+function showSyncIssue(message) {
+  $('sync-status').textContent = message;
+  $('sync-status').hidden = !message;
+}
+
 export async function startCloud({ onStore, onLibrary, onSignOut }, {
   client: providedClient, openStore = (client, owner) => new StudyStore(client, owner).open(),
   online = () => navigator.onLine
@@ -43,19 +48,22 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
       clearMigration();
       $('migration-panel').hidden = true;
     } catch (error) {
-      if (account.store === activeStore) $('sync-status').textContent = 'Migration pending · ' + error.message;
+      if (account.store === activeStore) showSyncIssue('Migration pending · ' + error.message);
     } finally {
       if (migratingStore === activeStore) migratingStore = null;
     }
   }
 
-  function status() {
+  function status(event) {
     const activeStore = account.store;
     if (!activeStore) return;
-    $('sync-status').textContent = activeStore.status;
+    const count = activeStore.pending.length;
+    const pending = count ? count + (count === 1 ? ' change saved' : ' changes saved') + ' on this device.' : '';
+    const failed = activeStore.error && activeStore.status !== 'Syncing…';
+    showSyncIssue(failed ? (pending ? pending + ' Sync failed. Try Sync now.' : 'Sync failed. Try Sync now.') : pending);
     $('sync-status').title = activeStore.error;
-    $('sync-now').disabled = Boolean(activeStore.running);
-    if (activeStore.status === 'Synced') transferProgress();
+    $('sync-now').disabled = Boolean(activeStore.running || activeStore.status === 'Syncing…');
+    if (event?.type === 'status' && activeStore.status === 'Synced') transferProgress();
   }
 
   const account = createAccountLifecycle({
@@ -65,21 +73,26 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
       $('study-app').hidden = $('migration-panel').hidden = true;
       $('auth-panel').hidden = Boolean(user);
       $('sign-out').hidden = $('sync-now').hidden = !user;
+      $('account-settings').hidden = !user;
+      $('account-settings').open = false;
       $('export').hidden = $('import').hidden = !user;
       $('sign-out').title = user?.email ? 'Signed in as ' + user.email : 'Sign out';
       $('export').disabled = $('import').disabled = !user;
       if (!user) {
         try { localStorage.removeItem('flashcards-last-account'); } catch { /* Optional offline preference. */ }
-        $('sync-status').textContent = '';
+        showSyncIssue('');
       }
     },
     ready(store, user) {
       try { localStorage.setItem('flashcards-last-account', JSON.stringify({ id: user.id })); }
       catch { /* Optional offline preference. */ }
       store.addEventListener('change', () => {
-        if (account.store === store) onLibrary(store.library);
+        if (account.store === store) {
+          onLibrary(store.library);
+          status();
+        }
       });
-      store.addEventListener('status', () => { if (account.store === store) status(); });
+      store.addEventListener('status', event => { if (account.store === store) status(event); });
       $('study-app').hidden = false;
       onStore(store);
       if (online()) store.sync();
@@ -89,6 +102,7 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
       $('study-app').hidden = true;
       $('auth-panel').hidden = false;
       $('sign-out').hidden = $('sync-now').hidden = $('export').hidden = $('import').hidden = true;
+      $('account-settings').hidden = true;
       $('auth-message').textContent = 'Your local storage could not be opened. ' + error.message;
     }
   });
@@ -121,7 +135,7 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
       if (account.store !== activeStore) return;
       clearMigration();
       $('migration-panel').hidden = true;
-    } catch (error) { $('sync-status').textContent = error.message; }
+    } catch (error) { showSyncIssue(error.message); }
   };
   addEventListener('flashcards-migration-ready', transferProgress);
   $('sign-out').onclick = async () => {
@@ -130,20 +144,15 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
       await activeStore.sync();
       if (account.store !== activeStore) return;
       if (activeStore.pending.length) {
-        $('sync-status').textContent = 'Sync your pending changes before signing out.';
+        showSyncIssue('Sync your pending changes before signing out.');
         return;
       }
     }
     const { error } = await client.auth.signOut({ scope: 'local' });
-    if (error) $('sync-status').textContent = error.message;
+    if (error) showSyncIssue(error.message);
   };
-  addEventListener('online', () => account.store?.sync());
-  addEventListener('offline', () => {
-    const activeStore = account.store;
-    if (activeStore) { activeStore.status = 'Offline · saved on this device'; status(); }
-  });
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) account.store?.sync();
+  addEventListener('pageshow', event => {
+    if (event.persisted && online()) account.store?.sync();
   });
   client.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT') account.switchTo(null);
@@ -162,7 +171,23 @@ export async function startCloud({ onStore, onLibrary, onSignOut }, {
   }
 
   if ('serviceWorker' in navigator) {
-    try { await navigator.serviceWorker.register('./sw.js'); }
-    catch { $('sync-status').title = 'Offline app caching is unavailable in this browser.'; }
+    try {
+      const registration = await navigator.serviceWorker.register('./sw.js');
+      const update = $('update-app');
+      function refreshUpdate() {
+        update.hidden = !registration.waiting || !navigator.serviceWorker.controller;
+      }
+      const watch = () => registration.installing?.addEventListener('statechange', refreshUpdate);
+      watch();
+      registration.addEventListener('updatefound', watch);
+      refreshUpdate();
+      update.onclick = () => {
+        if (!registration.waiting || !confirm('Reload to update the app? Saved grades stay on this device. The current round will restart.')) return;
+        navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
+        registration.waiting.postMessage({ type: 'flashcards-activate-update' });
+      };
+    } catch { /* Browsers without offline caching can still study and sync. */ }
   }
+  const version = import.meta.url.match(/app\.([a-f0-9]{16})\.js/)?.[1];
+  if (version) $('app-build').textContent = 'Build ' + version.slice(0, 7);
 }

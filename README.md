@@ -31,7 +31,7 @@ GitHub Pages publishes `.github/workflows/pages.yml` after pushes to `main`. Set
 
 In Supabase Authentication URL Configuration, set the Site URL to `https://matthew-compton.github.io/flashcards/` and allow that exact redirect URL. Add `http://127.0.0.1:8797/` when testing locally. Email link sign-in is enabled through Supabase's email provider.
 
-The manifest and service worker cache the app interface for offline use. The service worker only handles the listed same-origin app assets. Signed-in libraries and unsynced events live in a separate, account-scoped IndexedDB cache. Pending writes retry on reconnection and when the app returns to the foreground.
+The manifest and service worker cache the app interface for offline use. The service worker only handles the listed same-origin app assets. Signed-in libraries and unsynced events live in a separate, account-scoped IndexedDB cache. Opening or refreshing the app syncs saved progress when online. Settings has a manual **Sync now** button and shows any changes still saved on the current device.
 
 ## Moving existing progress
 

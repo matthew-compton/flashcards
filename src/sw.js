@@ -24,7 +24,15 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('french-flashcards-shell-') && key !== CACHE).map(key => caches.delete(key)))));
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(key => key.startsWith('french-flashcards-shell-') && key !== CACHE).map(key => caches.delete(key)));
+    await self.clients.claim();
+  })());
+});
+
+self.addEventListener('message', event => {
+  if (event.data?.type === 'flashcards-activate-update') event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('fetch', event => {

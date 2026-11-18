@@ -7,10 +7,12 @@ const user = { id: owner, email: 'test@example.invalid' };
 let authListener;
 let releaseSave;
 let waiting = false;
+let syncCalls = 0;
 
 // These controls exist only in the synthetic test build.
 window.flashcardsTest = {
   releaseName: __FIXTURE_RELEASE__,
+  get syncCalls() { return syncCalls; },
   holdNextSave() { waiting = true; },
   get hasHeldSave() { return Boolean(releaseSave); },
   release() { releaseSave?.(); }
@@ -21,7 +23,12 @@ const fixtureLibrary = {
     { id: 'one', name: 'Sample one', category: 'Synthetic', correct: 0, attempts: 0,
       cards: [{ fr: 'alpha', en: 'first' }, { fr: 'beta', en: 'second' }, { fr: 'gamma', en: 'third' }] },
     { id: 'two', name: 'Sample two', category: 'Synthetic', correct: 0, attempts: 0,
-      cards: [{ fr: 'delta', en: 'fourth' }, { fr: 'epsilon', en: 'fifth' }] }
+      cards: [{ fr: 'delta', en: 'fourth' }, { fr: 'epsilon', en: 'fifth' }] },
+    { id: 'mixed', name: 'Mix fixture', category: 'Mix practice', correct: 0, attempts: 0,
+      cards: Array.from({ length: 23 }, (_, index) => ({
+        fr: `Prompt ${index + 1}`, en: `Answer ${index + 1}`,
+        review: { step: 0, reviewedAt: new Date(Date.now() - 172_800_000).toISOString(), dueAt: new Date(Date.now() - 86_400_000).toISOString() }
+      })) }
   ]
 };
 
@@ -36,6 +43,7 @@ const client = {
     }
   },
   async rpc(name, args) {
+    syncCalls++;
     const response = await fetch('/test-sync', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ owner, name, args })
     });
@@ -49,8 +57,10 @@ export function startCloud(callbacks) {
     client,
     async openStore(connection, account) {
       const store = await new StudyStore(connection, account).open();
-      await store.sync();
-      if (!store.generation) await store.importLibrary(fixtureLibrary);
+      if (!store.generation) {
+        await store.sync();
+        if (!store.generation) await store.importLibrary(fixtureLibrary);
+      }
       const commit = store.commit.bind(store);
       store.commit = async (...args) => {
         if (waiting) {

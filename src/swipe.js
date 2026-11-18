@@ -1,7 +1,7 @@
 const dragStart = 12;
 const holdDuration = 500;
 
-export function bindCardGestures({ card, stage, feedback, getEntry, isRevealed, grade, flag }) {
+export function bindCardGestures({ card, stage, feedback, getEntry, isRevealed, grade, flag, tap }) {
   let gesture;
   let ignoreClickUntil = 0;
 
@@ -28,17 +28,18 @@ export function bindCardGestures({ card, stage, feedback, getEntry, isRevealed, 
     }
     ignoreClickUntil = 0;
     const entry = getEntry();
+    if (!entry) return;
+    // Real pointers can be captured. Programmatically dispatched pointers have no active capture.
+    if (event.isTrusted) card.setPointerCapture?.(event.pointerId);
     gesture = {
       id: event.pointerId, x: event.clientX, y: event.clientY, entry, revealed: isRevealed(),
-      threshold: Math.max(52, Math.min(92, card.clientWidth * .24))
+      threshold: Math.max(44, Math.min(76, card.clientWidth * .2))
     };
-    if (entry) {
-      gesture.holdTimer = setTimeout(() => {
-        if (gesture?.entry !== entry || getEntry() !== entry) return;
-        gesture.held = true;
-        flag();
-      }, holdDuration);
-    }
+    gesture.holdTimer = setTimeout(() => {
+      if (gesture?.entry !== entry || getEntry() !== entry) return;
+      gesture.held = true;
+      flag();
+    }, holdDuration);
   });
 
   function track(event) {
@@ -72,9 +73,16 @@ export function bindCardGestures({ card, stage, feedback, getEntry, isRevealed, 
   card.addEventListener('pointerup', event => {
     if (event.pointerId !== gesture?.id) return;
     const { dx, ready } = track(event);
-    const commit = ready && !gesture.held && gesture.revealed && isRevealed() && gesture.entry && gesture.entry === getEntry();
+    const sameCard = !gesture.held && gesture.entry === getEntry() && gesture.revealed === isRevealed();
+    const commit = ready && sameCard && gesture.revealed;
+    const tapped = !gesture.axis && sameCard;
     cancel();
     if (commit) grade(dx > 0);
+    if (tapped) {
+      // Some mobile browsers suppress the first click after a drag, even on a new card.
+      ignoreClickUntil = performance.now() + 500;
+      tap();
+    }
   });
   for (const type of ['pointercancel', 'lostpointercapture']) {
     card.addEventListener(type, event => {

@@ -24,13 +24,12 @@ function transactionResult(transaction) {
 }
 
 export class StudyStore extends EventTarget {
-  constructor(client, owner, { databaseName = DB_NAME, now = Date.now, uuid = () => crypto.randomUUID(),
-    schedule = (fn, ms) => setInterval(fn, ms), unschedule = timer => clearInterval(timer) } = {}) {
+  constructor(client, owner, { databaseName = DB_NAME, now = Date.now, uuid = () => crypto.randomUUID() } = {}) {
     super();
     this.client = client;
     this.owner = owner;
     this.databaseName = databaseName;
-    Object.assign(this, { now, uuid, schedule, unschedule });
+    Object.assign(this, { now, uuid });
     this.records = [];
     this.library = { version: 11, decks: [] };
     this.generation = null;
@@ -40,19 +39,17 @@ export class StudyStore extends EventTarget {
     this.status = 'Loading saved progress…';
     this.closed = false;
     this.channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('flashcards-' + owner) : null;
-    this.channel?.addEventListener('message', () => this.reload().then(() => this.sync()).catch(error => this.failed(error)));
+    this.channel?.addEventListener('message', () => this.reload().catch(error => this.failed(error)));
   }
 
   async open() {
     this.db = await openDatabase(this.databaseName);
     await this.reload();
-    this.timer = this.schedule(() => this.sync(), 15_000);
     return this;
   }
 
   close() {
     this.closed = true;
-    this.unschedule(this.timer);
     this.channel?.close();
     this.db?.close();
   }
@@ -106,7 +103,6 @@ export class StudyStore extends EventTarget {
       }));
       await this.write(records);
       this.channel?.postMessage('changed');
-      this.sync();
       return records.map(record => record.event);
     });
   }
@@ -144,7 +140,6 @@ export class StudyStore extends EventTarget {
     this.running = this.performSync().catch(error => this.failed(error)).finally(() => {
       this.running = null;
       this.dispatchEvent(new Event('status'));
-      if (this.pending.length && !this.error && !this.closed) queueMicrotask(() => this.sync());
     });
     return this.running;
   }
@@ -152,6 +147,7 @@ export class StudyStore extends EventTarget {
   async performSync() {
     this.status = 'Syncing…';
     this.dispatchEvent(new Event('status'));
+    await this.reload();
     let more = true;
     while (more && !this.closed) {
       const after = this.records.reduce((max, record) => Math.max(max, record.revision ?? 0), 0);

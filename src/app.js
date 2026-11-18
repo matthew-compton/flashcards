@@ -76,6 +76,7 @@ let editingOriginal;
 let front = "fr";
 let round;
 let mixSettings;
+let mixQueue = [];
 let nextReviewRefresh = Infinity;
 let reportingEntry;
 let fixingEntry;
@@ -459,6 +460,7 @@ function beginRound(cards, { shuffle = false, mix = null } = {}) {
 }
 
 function startRound(shuffle = false) {
+  mixQueue = [];
   const deck = findDeck();
   const cards = deck?.cards.map((_, cardIndex) => ({ deckId: deck.id, cardIndex })) ?? [];
   beginRound(shuffle ? shuffled(cards) : cards, { shuffle });
@@ -467,17 +469,26 @@ function startRound(shuffle = false) {
 function mixSelection() {
   const form = new FormData($("mix-form"));
   const sections = new Set(form.getAll("mix-section"));
-  return { mode: form.get("mix-mode"), direction: form.get("mix-direction"), sections };
+  const size = form.get("mix-size") === "all" ? Infinity : MIX_SIZE;
+  return { mode: form.get("mix-mode"), direction: form.get("mix-direction"), sections, size };
+}
+
+function nextMixRound() {
+  mixQueue = mixQueue.filter(cardFor);
+  front = mixSettings.direction;
+  beginRound(mixQueue.splice(0, mixSettings.size), { mix: mixSettings.mode });
+  $("card").focus();
 }
 
 function updateMixStatus() {
   const settings = mixSelection();
   const count = reviewBuckets(data.decks, settings, Date.now()).reduce((total, bucket) => total + bucket.cards.length, 0);
-  const size = settings.mode === "missed" ? count : Math.min(count, MIX_SIZE);
+  const size = Math.min(count, settings.size);
   $("start-mix").disabled = !size;
   let status = size + (size === 1 ? " card in this review" : " cards in this review");
   if (!settings.sections.size) status = "Select at least one section.";
   else if (!size) status = mixModes[settings.mode].empty;
+  else if (size < count) status = size + " of " + count + " eligible cards in the first round";
   else if (settings.mode === "missed") status = size + (size === 1 ? " card" : " cards") + " to retry from the last " + MISSED_DAYS + " days";
   $("mix-status").textContent = status;
 }
@@ -498,6 +509,7 @@ function openMix() {
   $("mix-sections").replaceChildren(...labels);
   $("mix-form").elements["mix-mode"].value = mixSettings?.mode ?? "due";
   $("mix-form").elements["mix-direction"].value = front;
+  $("mix-form").elements["mix-size"].value = mixSettings?.size === Infinity ? "all" : String(MIX_SIZE);
   updateMixStatus();
   $("mix-dialog").showModal();
 }
@@ -543,7 +555,7 @@ function render() {
   const finished = total > 0 && round.index === total;
   $("direction").textContent = directionName(front, deck);
   $("direction").hidden = Boolean(deck && !deck.cards.some(card => !isExercise(card)));
-  $("direction").disabled = mix === "due" || mix === "missed";
+  $("direction").disabled = Boolean(mix);
   $("direction").title = $("direction").disabled ? "Direction selected when starting this review" : "Change the language order for vocabulary and examples";
   $("shuffle").disabled = total < 2;
   $("undo-actions").hidden = !total;
@@ -555,7 +567,13 @@ function render() {
   if (finished) {
     const summary = round.correct + " of " + total + " correct · " + rate({ correct: round.correct, attempts: total });
     if (mix) {
-      showMessage("Round complete", summary, "Start another mix", openMix);
+      const remaining = mixQueue.filter(cardFor).length;
+      if (remaining) {
+        const count = Math.min(remaining, mixSettings.size);
+        showMessage("Round complete", summary + " · " + remaining + " remaining", "Next " + count, nextMixRound);
+      } else {
+        showMessage("Round complete", summary, "Start another mix", openMix);
+      }
     } else {
       showMessage("Round complete", summary, "Study again", () => {
         startRound(round.shuffle);
@@ -924,11 +942,10 @@ $("mix-form").addEventListener("submit", async event => {
     return;
   }
   mixSettings = settings;
-  front = settings.direction;
+  mixQueue = cards;
   $("mix-dialog").close();
   notice("");
-  beginRound(cards, { mix: settings.mode });
-  $("card").focus();
+  nextMixRound();
 });
 $("add-card").onclick = () => addCardFields(undefined, true);
 $("close-editor").onclick = () => $("editor").close();
@@ -955,7 +972,8 @@ $("direction").onclick = () => {
   if (!$("review").hidden) $("card").focus();
 };
 document.addEventListener("keydown", event => {
-  if (saving || !studyStore || document.querySelector("dialog[open]") || $("review").hidden || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (saving || !studyStore || document.querySelector("dialog[open]") || $("account-settings").open ||
+      $("review").hidden || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === " " && !event.target.closest("button, input, summary")) {
     event.preventDefault();
     flip();
@@ -986,7 +1004,7 @@ const movableControls = [
   [$("flag-card"), $("mobile-card-actions")],
   [$("study-actions"), $("mobile-deck-controls")],
   [$("stats"), $("mobile-deck-controls")],
-  [$("account-actions"), $("mobile-account-controls")]
+  [$("account-settings"), $("mobile-settings")]
 ].map(([element, mobileContainer]) => {
   const desktopPosition = document.createComment(element.id);
   element.before(desktopPosition);
@@ -1003,16 +1021,28 @@ function placeStudyControls() {
   }
 }
 const cancelCardGesture = bindCardGestures({
-  card: $("card"), stage: $("card-stage"), feedback: $("swipe-feedback"), grade, flag: openCardFlag,
-  getEntry: () => mobileStudy.matches && !saving && round && !$("review").hidden &&
+  card: $("card"), stage: $("card-stage"), feedback: $("swipe-feedback"), grade, flag: openCardFlag, tap: flip,
+  getEntry: () => !saving && round && !$("review").hidden &&
     !document.querySelector("dialog[open]") ? round.cards[round.index] : null,
   isRevealed: () => Boolean(round?.revealed)
 });
 mobileStudy.addEventListener("change", placeStudyControls);
 $("show-decks").onclick = () => { if (!saving) $("mobile-decks").showModal(); };
-$("show-study-options").onclick = () => { if (!saving) $("mobile-study-options").showModal(); };
+for (const id of ["show-study-options", "show-finished-options"]) {
+  $(id).onclick = () => { if (!saving) $("mobile-study-options").showModal(); };
+}
 $("close-mobile-decks").onclick = () => $("mobile-decks").close();
 $("close-mobile-options").onclick = () => $("mobile-study-options").close();
+
+const settingsMenu = $("account-settings");
+document.addEventListener("pointerdown", event => {
+  if (settingsMenu.open && !settingsMenu.contains(event.target)) settingsMenu.open = false;
+});
+settingsMenu.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !settingsMenu.open) return;
+  settingsMenu.open = false;
+  settingsMenu.querySelector("summary").focus();
+});
 
 // Account loading starts the first round.
 
@@ -1056,6 +1086,8 @@ await startCloud({
   onLibrary: applyCloudLibrary,
   onSignOut() {
     studyStore = null; data = { version: currentVersion, decks: [] }; round = null;
+    mixQueue = [];
+    mixSettings = undefined;
     activeGeneration = undefined;
     $('library').replaceChildren(); $('term').textContent = '';
     for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();

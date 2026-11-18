@@ -17,11 +17,12 @@ function fixture() {
   const feedback = { classList: classes(), hidden: true };
   const grades = [];
   const flags = [];
+  const taps = [];
   let entry = {};
   let revealed = false;
   const cancel = bindCardGestures({
     card, stage, feedback, getEntry: () => entry, isRevealed: () => revealed,
-    grade: value => grades.push(value), flag: () => flags.push(entry)
+    grade: value => grades.push(value), flag: () => flags.push(entry), tap: () => taps.push(entry)
   });
   function pointer(type, clientX, clientY = 200, options = {}) {
     card.dispatchEvent(Object.assign(new Event(type), {
@@ -31,7 +32,7 @@ function fixture() {
   function click(detail = 1) {
     return card.dispatchEvent(Object.assign(new Event('click', { cancelable: true }), { detail }));
   }
-  return { pointer, click, cancel, feedback, grades, flags,
+  return { pointer, click, cancel, feedback, grades, flags, taps,
     reveal: () => { revealed = true; }, changeCard: () => { entry = {}; }
   };
 }
@@ -61,7 +62,7 @@ test('grades left and right once on release, only on a revealed card', () => {
 });
 
 test('short drags, vertical scroll, interrupted drags and card changes do not grade', () => {
-  const { pointer, click, cancel, grades, reveal, changeCard } = fixture();
+  const { pointer, click, cancel, grades, taps, reveal, changeCard } = fixture();
   reveal();
   pointer('pointerdown', 180);
   pointer('pointermove', 220);
@@ -88,7 +89,8 @@ test('short drags, vertical scroll, interrupted drags and card changes do not gr
   pointer('pointerup', 300);
   pointer('pointerdown', 180);
   pointer('pointerup', 181);
-  assert.equal(click(), true);
+  assert.equal(click(), false);
+  assert.equal(taps.length, 1);
   assert.deepEqual(grades, []);
 });
 
@@ -115,10 +117,11 @@ test('holding either face opens Flag card once without flipping or grading on re
 
 test('tap, scroll, swipe, canceled touch, and a changed card never open Flag card', t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const { pointer, click, grades, flags, reveal, changeCard } = fixture();
+  const { pointer, click, grades, flags, taps, reveal, changeCard } = fixture();
   pointer('pointerdown', 180);
   pointer('pointerup', 180);
-  assert.equal(click(), true);
+  assert.equal(click(), false);
+  assert.equal(taps.length, 1);
   t.mock.timers.tick(500);
 
   pointer('pointerdown', 180);
@@ -141,5 +144,6 @@ test('tap, scroll, swipe, canceled touch, and a changed card never open Flag car
   t.mock.timers.tick(500);
   pointer('pointerup', 180);
   assert.equal(flags.length, 0);
+  assert.equal(taps.length, 1);
   assert.deepEqual(grades, [true]);
 });

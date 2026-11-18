@@ -76,7 +76,7 @@ export function selectReview(decks, settings, { now = Date.now(), random = Math.
   }
   const cards = [];
   let previousDeck;
-  while (buckets.length && (settings.mode === 'missed' || cards.length < MIX_SIZE)) {
+  while (buckets.length) {
     const otherSection = buckets.findIndex(({ deck }) => deck.category !== previousDeck?.category);
     const otherDeck = buckets.findIndex(({ deck }) => deck !== previousDeck);
     const index = otherSection >= 0 ? otherSection : Math.max(otherDeck, 0);
