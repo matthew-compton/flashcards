@@ -1,6 +1,5 @@
-import { build } from 'esbuild';
-import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile, cp, readdir, rm, rename } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
+import { buildArtifacts } from './artifacts.mjs';
 import path from 'node:path';
 
 let local = {};
@@ -23,32 +22,8 @@ const out = path.resolve('dist');
 if (path.basename(out) !== 'dist' || path.dirname(out) !== process.cwd()) throw new Error('Unexpected build directory.');
 await rm(out, { recursive: true, force: true });
 await mkdir(out);
-await build({
-  entryPoints: ['src/app.js'], outfile: 'dist/app.js', bundle: true, format: 'esm', minify: false,
-  target: ['safari16', 'chrome110'],
-  define: { __SUPABASE_URL__: JSON.stringify(url), __SUPABASE_PUBLISHABLE_KEY__: JSON.stringify(key) }
+await buildArtifacts(out, {
+  define: { __SUPABASE_URL__: JSON.stringify(url), __SUPABASE_PUBLISHABLE_KEY__: JSON.stringify(key) },
+  production: true
 });
-const scriptHash = createHash('sha256').update(await readFile('dist/app.js')).digest('hex').slice(0, 16);
-const scriptName = `app.${scriptHash}.js`;
-await rename('dist/app.js', 'dist/' + scriptName);
-const html = await readFile('src/index.html', 'utf8');
-await writeFile('dist/index.html', html.replace('./app.js', './' + scriptName));
-await cp('src/icon.png', 'dist/icon.png');
-await writeFile('dist/.nojekyll', '');
-await writeFile('dist/manifest.webmanifest', JSON.stringify({
-  name: 'Flashcards', short_name: 'Flashcards', start_url: './', scope: './', display: 'standalone',
-  background_color: '#f7f6fb', theme_color: '#5b43ab',
-  icons: [{ src: './icon.png', sizes: '512x512', type: 'image/png', purpose: 'any' }]
-}, null, 2));
-const files = ['index.html', scriptName, 'icon.png', 'manifest.webmanifest'];
-const hash = createHash('sha256');
-for (const file of files) hash.update(await readFile('dist/' + file));
-const revision = hash.digest('hex').slice(0, 16);
-const worker = await readFile('src/sw.js', 'utf8');
-await writeFile('dist/sw.js', worker.replaceAll('__BUILD_REVISION__', revision).replaceAll('__APP_SCRIPT__', scriptName));
-
-const allow = new Set([...files, '.nojekyll', 'sw.js']);
-for (const file of await readdir(out)) {
-  if (!allow.has(file)) throw new Error('Unexpected public asset: ' + file);
-}
 console.log('Built the public app shell. Private decks are imported after sign-in.');

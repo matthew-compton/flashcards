@@ -1,4 +1,5 @@
 import { changesBetween, materialize, prepareLibrary } from './model.js';
+import { EVENT_VERSION, validateEvent, validateSyncPage } from './events.js';
 
 const DB_NAME = 'french-flashcards-private-v1';
 
@@ -23,11 +24,13 @@ function transactionResult(transaction) {
 }
 
 export class StudyStore extends EventTarget {
-  constructor(client, owner, { databaseName = DB_NAME } = {}) {
+  constructor(client, owner, { databaseName = DB_NAME, now = Date.now, uuid = () => crypto.randomUUID(),
+    schedule = (fn, ms) => setInterval(fn, ms), unschedule = timer => clearInterval(timer) } = {}) {
     super();
     this.client = client;
     this.owner = owner;
     this.databaseName = databaseName;
+    Object.assign(this, { now, uuid, schedule, unschedule });
     this.records = [];
     this.library = { version: 11, decks: [] };
     this.generation = null;
@@ -43,13 +46,13 @@ export class StudyStore extends EventTarget {
   async open() {
     this.db = await openDatabase(this.databaseName);
     await this.reload();
-    this.timer = setInterval(() => this.sync(), 15_000);
+    this.timer = this.schedule(() => this.sync(), 15_000);
     return this;
   }
 
   close() {
     this.closed = true;
-    clearInterval(this.timer);
+    this.unschedule(this.timer);
     this.channel?.close();
     this.db?.close();
   }
@@ -67,6 +70,8 @@ export class StudyStore extends EventTarget {
       request.onerror = () => reject(request.error);
     });
     if (this.closed) return;
+    if (rows.length === this.records.length && rows.every((row, index) =>
+      row.event.id === this.records[index].event.id && row.revision === this.records[index].revision)) return;
     this.records = rows;
     Object.assign(this, materialize(rows));
     this.dispatchEvent(new Event('change'));
@@ -81,24 +86,29 @@ export class StudyStore extends EventTarget {
     await this.reload();
   }
 
-  commit(operations) {
-    const action = async () => {
+  enqueue(action) {
+    const result = this.localQueue.then(action);
+    this.localQueue = result.catch(() => {});
+    return result;
+  }
+
+  commit(operations, { generation = this.generation } = {}) {
+    return this.enqueue(async () => {
       if (!this.generation) throw new Error('Import your existing library before studying.');
+      if (generation !== this.generation) throw new Error('The library was replaced. Start a new round.');
       const lastAt = this.records.reduce((max, record) => Math.max(max, Date.parse(record.event.at)), 0);
-      const timestamp = Math.max(Date.now(), lastAt + 1);
+      const timestamp = Math.max(this.now(), lastAt + 1);
       const records = operations.map((operation, index) => ({
         revision: null,
         order: timestamp + index,
-        event: { ...operation, id: crypto.randomUUID(), generation: this.generation, at: new Date(timestamp + index).toISOString() }
+        event: validateEvent({ ...operation, schemaVersion: EVENT_VERSION, id: this.uuid(), generation,
+          at: new Date(timestamp + index).toISOString() })
       }));
       await this.write(records);
       this.channel?.postMessage('changed');
       this.sync();
       return records.map(record => record.event);
-    };
-    const result = this.localQueue.then(action);
-    this.localQueue = result.catch(() => {});
-    return result;
+    });
   }
 
   async saveLibrary(before, after) {
@@ -108,14 +118,16 @@ export class StudyStore extends EventTarget {
 
   async importLibrary(input, { sourceHash } = {}) {
     const library = prepareLibrary(input);
-    const id = crypto.randomUUID();
-    const now = Date.now();
-    const event = {
-      id, generation: id, type: this.generation ? 'library.replace' : 'library.initialize',
-      at: new Date(now).toISOString(), payload: { library, ...(sourceHash ? { sourceHash } : {}) }
-    };
-    await this.write([{ event, revision: null, order: now }]);
-    this.channel?.postMessage('changed');
+    await this.enqueue(async () => {
+      const id = this.uuid();
+      const now = this.now();
+      const event = validateEvent({
+        id, generation: id, type: this.generation ? 'library.replace' : 'library.initialize',
+        schemaVersion: EVENT_VERSION, at: new Date(now).toISOString(), payload: { library, ...(sourceHash ? { sourceHash } : {}) }
+      });
+      await this.write([{ event, revision: null, order: now }]);
+      this.channel?.postMessage('changed');
+    });
     await this.sync();
     return library;
   }
@@ -147,7 +159,7 @@ export class StudyStore extends EventTarget {
       const { data, error } = await this.client.rpc('sync_flashcards', { after_revision: after, new_events: pending });
       if (error) throw error;
       if (this.closed) return;
-      if (!data || !Array.isArray(data.events)) throw new Error('The sync response was incomplete. Your local progress is saved.');
+      validateSyncPage(data, after);
       if (data.events.length) await this.write(data.events.map(record => ({ ...record, order: Date.parse(record.event.at) })));
       more = data.hasMore || this.pending.length > 0;
       if (more && !data.events.length) throw new Error('Sync could not confirm the pending changes. Please retry.');

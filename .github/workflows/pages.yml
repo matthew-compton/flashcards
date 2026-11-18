@@ -11,7 +11,12 @@ concurrency:
   group: pages
   cancel-in-progress: false
 jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+    permissions:
+      contents: read
   publish:
+    needs: quality
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -23,7 +28,6 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm test
       - run: npm run build
         env:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}

@@ -1,20 +1,7 @@
-"use strict";
+import { DAY as dayMilliseconds, REVIEW_INTERVALS as reviewIntervals, isExercise, practiceDirection } from './review.js';
 
-const courseDecks = [];
-const studyDecks = [];
-const conjugationDecks = [];
-const sectionStorageKey = "french-flashcards-library-sections";
 const currentVersion = 11;
-const dayMilliseconds = 24 * 60 * 60 * 1000;
 const legacyReviewIntervals = [1, 1, 3, 7, 14, 30, 60];
-const reviewIntervals = [1, 7, 14, 30, 60, 60, 60];
-const mixSize = 20;
-const missedReviewDays = 7;
-const mixModes = {
-  due: { title: "Spaced review", empty: "No cards are due. Try shuffling these sections." },
-  missed: { title: "Missed cards", empty: "No cards to retry from the last " + missedReviewDays + " days." },
-  shuffle: { title: "Shuffled review", empty: "These sections have no cards." }
-};
 const sessionModes = {
   deck: "Deck review",
   shuffled: "Shuffled deck",
@@ -23,9 +10,7 @@ const sessionModes = {
   missed: "Missed cards"
 };
 const practiceLabels = { fr: "Recognition", en: "Recall", exercise: "Exercises" };
-const directionLabels = { fr: "French → English", en: "English → French" };
 const flagReasons = { context: "Needs context", wording: "Unclear wording", error: "Possible error" };
-const $ = id => document.getElementById(id);
 const cardLabels = {
   vocabulary: "Vocabulary",
   grammar: "Grammar",
@@ -72,7 +57,7 @@ function validFlag(flag) {
     (flag.revision === undefined || (isText(flag.revision.fr, 500) && isText(flag.revision.en, 500)));
 }
 
-function validateBackup(data) {
+export function validateBackup(data) {
   if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, currentVersion].includes(data?.version) || !Array.isArray(data.decks)) throw new Error("Invalid backup");
   const ids = new Set();
   for (const deck of data.decks) {
@@ -97,39 +82,32 @@ function validateBackup(data) {
   return data;
 }
 
-function notice(text) {
-  $("notice").hidden = !text;
-  $("notice").textContent = text;
-}
-
 function upgradeReview(review, latestSessionAt) {
   if (!review || review.dueAt) return review;
   const { dueOn, ...progress } = review;
   // Old saves retained a calendar due date, so infer the review day from its interval.
   // Use the end of that day to allow a full interval even after a late-night review.
-  const reviewed = new Date(dueOn + "T00:00:00");
-  reviewed.setDate(reviewed.getDate() - legacyReviewIntervals[review.step]);
-  reviewed.setHours(23, 59, 59, 999);
+  // The old format carries no time zone. Use the end of its UTC calendar day on every device.
+  const reviewedAt = Date.parse(dueOn) + (1 - legacyReviewIntervals[review.step]) * dayMilliseconds - 1;
   // Session times provide a conservative upper bound when cards were practiced early.
-  const dueFrom = Math.max(reviewed.getTime(), Date.parse(latestSessionAt) || 0);
+  const dueFrom = Math.max(reviewedAt, Date.parse(latestSessionAt) || 0);
   return {
     ...progress,
-    reviewedAt: reviewed.toISOString(),
+    reviewedAt: new Date(reviewedAt).toISOString(),
     dueAt: new Date(dueFrom + reviewIntervals[review.step] * dayMilliseconds).toISOString()
   };
 }
 
-function upgradeLibrary(library, backfillReviewDates = false) {
+function upgradeLibrary(library) {
   if (library.version === currentVersion) return library;
   let decks = library.decks.filter(deck => deck.id !== "verbs-present-2").map(deck =>
     deck.id === "verbs-present-1" && deck.name === "Top 50 Present Tense · Part 1"
       ? { ...deck, name: "Top 25 Present Tense" } : deck);
   decks = decks.map(deck => deck.category === "Conjugation" ? { ...deck, category: "Verbs" } : deck);
-  if (backfillReviewDates && library.version === 3) {
+  if (library.version === 3) {
     // The course decks first became available on Nov 12, before review dates were recorded.
-    const courseIds = new Set(courseDecks.map(deck => deck.id));
     decks = decks.map(deck => {
-      if (deck.attempts > 0 && !deck.checkedAt && courseIds.has(deck.id)) {
+      if (deck.attempts > 0 && !deck.checkedAt && /^echange-(?:[1-9]|1[0-9]|2[0-4])$/.test(deck.id)) {
         return { ...deck, checkedAt: "2026-11-12" };
       }
       return deck;
@@ -155,24 +133,9 @@ function upgradeLibrary(library, backfillReviewDates = false) {
       }))
     };
   });
-  const savedIds = new Set(decks.map(deck => deck.id));
-  const addedDecks = [];
-  if (library.version < 5) addedDecks.push(...studyDecks);
-  if (library.version < 6) addedDecks.push(...conjugationDecks);
-  return {
-    ...library,
-    version: currentVersion,
-    decks: [...decks, ...addedDecks.filter(deck => !savedIds.has(deck.id))]
-  };
+  return { ...library, version: currentVersion, decks };
 }
 
-
-function isExercise(card) {
-  return card.kind === "grammar" || card.kind === "conjugation";
-}
-function practiceDirection(card, language) {
-  return isExercise(card) ? "exercise" : language;
-}
 export function normalizeLegacy(input) {
-  return upgradeLibrary(validateBackup(structuredClone(input)), true);
+  return upgradeLibrary(validateBackup(structuredClone(input)));
 }
