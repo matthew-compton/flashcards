@@ -123,6 +123,42 @@ test('adding decks keeps course sections ordered, preserves progress, and skips 
   await expect(prompt(page)).toHaveText('Je suis');
 });
 
+test('card updates add and revise cards in the existing deck without resetting progress', async ({ page }) => {
+  await openStudy(page);
+  await card(page).click();
+  await page.locator('#correct').click();
+  await expect(prompt(page)).toHaveText('beta');
+  const file = {
+    name: 'card-updates.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({
+      format: 'flashcards-card-updates', version: 1, decks: [{
+        id: 'one',
+        add: [{ id: 'another', fr: 'nouveau', en: 'new', kind: 'vocabulary' }],
+        revise: [{ id: 'imported-1', from: { fr: 'beta', en: 'second' }, to: { fr: 'bêta', en: 'second' } }]
+      }]
+    }))
+  };
+  const choose = async () => {
+    await page.locator('#account-settings summary').click();
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Add decks from file' }).click();
+    await (await chooser).setFiles(file);
+  };
+  await choose();
+  const preview = page.getByRole('dialog', { name: 'Update cards' });
+  await expect(preview).toContainText('1 card to add · 1 card to update');
+  await preview.getByRole('button', { name: 'Apply updates' }).click();
+  await expect(page.locator('#notice')).toHaveText('Applied 2 card updates to your library.');
+  await expect(prompt(page)).toHaveText('bêta');
+  await choose();
+  await expect(page.locator('#notice')).toHaveText('These card updates are already in your library.');
+  if (await page.locator('#show-decks').isVisible()) await page.getByRole('button', { name: 'My decks' }).click();
+  const deck = page.locator('[data-deck="one"]');
+  await expect(deck).toContainText('4 cards');
+  await expect(deck).toContainText('100%');
+});
+
 test('a delayed answer never grades or advances the newly selected round', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'The desktop sidebar stays available during a save');
   await openStudy(page);

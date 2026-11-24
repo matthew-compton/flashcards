@@ -2,12 +2,14 @@ import { prepareLibrary } from "./model.js";
 import { startCloud } from "./cloud.js";
 import { bindCardGestures } from "./swipe.js";
 import { resolveFlag, rewriteCard, splitCard, upsertFlag } from "./card-edits.js";
+import { CARD_UPDATE_FORMAT, readCardUpdates, planCardUpdates } from "./card-import.js";
 import { createRound, flipRound, gradeRound, resetFace, skipRound, undoRound } from "./round.js";
 import { cardText, firstSide, isDue, isExercise, practiceDirection, reviewBuckets, selectReview, shuffled, MISSED_DAYS, MIX_SIZE } from "./review.js";
 "use strict";
 
 const sectionStorageKey = "french-flashcards-library-sections";
-const courseCategoryOrder = new Map([["A1", 0], ["A2", 1], ["B1.1", 2], ["B1.2", 3]]);
+const courseCategoryOrder = new Map(["A1", "A2", "B1.1", "B1.2", "B2.1", "B2.2", "B2.3", "B2.4"]
+  .map((level, rank) => [level, rank]));
 const currentVersion = 11;
 const mixModes = {
   due: { title: "Spaced review", empty: "No cards are due. Try shuffling these sections." },
@@ -904,6 +906,13 @@ function deckCount(count) {
   return count + (count === 1 ? " deck" : " decks");
 }
 
+function cardUpdateCount({ added, corrected }) {
+  return [
+    added && (added + (added === 1 ? " card to add" : " cards to add")),
+    corrected && (corrected + (corrected === 1 ? " card to update" : " cards to update"))
+  ].filter(Boolean).join(" · ");
+}
+
 $("append-decks").onclick = () => $("append-decks-file").click();
 $("append-decks-file").onchange = async event => {
   const file = event.target.files[0];
@@ -911,27 +920,43 @@ $("append-decks-file").onchange = async event => {
   const store = studyStore;
   const generation = store?.generation;
   if (!file || !generation) return;
-  let decks;
+  let preview;
   try {
-    decks = prepareLibrary(JSON.parse(await file.text())).decks;
+    const input = JSON.parse(await file.text());
+    preview = input?.format === CARD_UPDATE_FORMAT
+      ? { updates: readCardUpdates(input) }
+      : { decks: prepareLibrary(input).decks };
   } catch {
-    notice("That file is not a valid Flashcards backup.");
+    notice("That file is not a valid Flashcards backup or card update.");
     return;
   }
   if (studyStore !== store || store.generation !== generation) return;
   $("account-settings").open = false;
-  const pending = newDecks(decks, store.library);
-  if (!pending.length) {
-    notice("This file has no new decks.");
-    return;
+  const summary = $("append-decks-summary");
+  const list = $("append-decks-list");
+  if (preview.updates) {
+    try {
+      const plan = planCardUpdates(preview.updates, store.library);
+      if (!plan.operations.length) { notice("These card updates are already in your library."); return; }
+      summary.textContent = cardUpdateCount(plan) + ".";
+      list.replaceChildren(...plan.targets.map(target =>
+        make("li", "", target.name + " · " + cardUpdateCount({ added: target.addCount, corrected: target.correctionCount }))));
+    } catch (error) {
+      notice(error.message);
+      return;
+    }
+  } else {
+    const pending = newDecks(preview.decks, store.library);
+    if (!pending.length) { notice("This file has no new decks."); return; }
+    const cards = pending.reduce((count, deck) => count + deck.cards.length, 0);
+    const skipped = preview.decks.length - pending.length;
+    summary.textContent = deckCount(pending.length) + " to add with " + cards + (cards === 1 ? " card." : " cards.") +
+      (skipped ? " Skipping " + deckCount(skipped) + " already in your library." : "");
+    list.replaceChildren(...pending.map(deck => make("li", "", deck.name)));
   }
-  appendPreview = { store, generation, decks };
-  const cards = pending.reduce((count, deck) => count + deck.cards.length, 0);
-  const skipped = decks.length - pending.length;
-  $("append-decks-summary").textContent =
-    deckCount(pending.length) + " to add with " + cards + (cards === 1 ? " card." : " cards.") +
-    (skipped ? " Skipping " + deckCount(skipped) + " already in your library." : "");
-  $("append-decks-list").replaceChildren(...pending.map(deck => make("li", "", deck.name)));
+  appendPreview = { ...preview, store, generation };
+  $("append-decks-title").textContent = preview.updates ? "Update cards" : "Add decks";
+  appendConfirm.textContent = preview.updates ? "Apply updates" : "Add decks";
   $("append-decks-error").hidden = true;
   appendConfirm.disabled = appendCancel.disabled = false;
   notice("");
@@ -943,21 +968,35 @@ appendDialog.addEventListener("close", () => { appendPreview = undefined; });
 appendConfirm.onclick = async () => {
   const preview = appendPreview;
   if (!preview) return;
-  const { store, generation, decks } = preview;
+  const { store, generation, decks, updates } = preview;
   appendConfirm.disabled = appendCancel.disabled = true;
   try {
-    const pending = newDecks(decks, store.library);
-    if (pending.length) {
-      await store.commit(pending.map(deck => ({ type: "deck.add", payload: { deck } })), { generation });
+    let operations;
+    let saved;
+    let empty;
+    if (updates) {
+      await store.sync();
+      if (studyStore !== store || appendPreview !== preview) return;
+      if (store.status !== "Synced") throw new Error("Sync your library before applying card updates.");
+      const plan = planCardUpdates(updates, store.library);
+      operations = plan.operations;
+      saved = "Applied " + operations.length + (operations.length === 1 ? " card update" : " card updates");
+      empty = "These card updates are already in your library.";
+    } else {
+      const pending = newDecks(decks, store.library);
+      operations = pending.map(deck => ({ type: "deck.add", payload: { deck } }));
+      saved = "Added " + deckCount(pending.length);
+      empty = "This file has no new decks.";
     }
+    if (operations.length) await store.commit(operations, { generation });
     if (studyStore !== store || appendPreview !== preview) return;
     appendDialog.close();
     render();
-    if (!pending.length) { notice("This file has no new decks."); return; }
+    if (!operations.length) { notice(empty); return; }
     await store.sync();
     if (studyStore === store) {
       notice(store.generation !== generation ? "Your library changed while syncing. Check your decks and try again." :
-        "Added " + deckCount(pending.length) +
+        saved +
           (store.status === "Synced" ? " to your library." : " on this device. They’ll sync when the connection is available."));
     }
   } catch (error) {
