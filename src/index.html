@@ -232,7 +232,9 @@ form { display: grid; gap: 12px; }
         <button id="sync-now" class="button" type="button">Sync now</button>
         <span id="sync-status" class="sync-status" role="status" hidden></span>
         <button id="export" class="button" type="button">Export backup</button>
+        <button id="append-decks" class="button" type="button" disabled>Add decks from file</button>
         <button id="import" class="button" type="button">Import backup</button>
+        <input id="append-decks-file" type="file" accept=".json,application/json" hidden>
         <input id="backup-file" type="file" accept=".json,application/json" hidden>
         <button id="update-app" class="button" type="button" hidden>Update app</button>
         <button id="sign-out" class="button" type="button">Sign out</button>
@@ -338,6 +340,16 @@ form { display: grid; gap: 12px; }
   <div class="editor-heading"><h2 id="mobile-options-title">Study options</h2><button class="button" id="close-mobile-options" type="button">Close</button></div>
   <div id="mobile-card-actions"></div>
   <div id="mobile-deck-controls"></div>
+</dialog>
+<dialog id="append-decks-dialog" aria-labelledby="append-decks-title">
+  <div class="editor-heading">
+    <h2 id="append-decks-title">Add decks</h2>
+    <button id="close-append-decks" class="button" type="button">Cancel</button>
+  </div>
+  <p id="append-decks-summary"></p>
+  <ul id="append-decks-list"></ul>
+  <button id="confirm-append-decks" class="button primary" type="button">Add decks</button>
+  <p id="append-decks-error" class="notice" role="status" hidden></p>
 </dialog>
 <dialog id="flag-dialog" aria-labelledby="flag-title">
   <div class="editor-heading"><h2 id="flag-title">Flag card</h2><button id="close-flag" class="button" type="button">Close</button></div>

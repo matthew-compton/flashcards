@@ -77,6 +77,47 @@ test('tap to reveal, grade, undo, and return a skipped card to the end', async (
   }
 });
 
+test('adding decks from a file keeps existing progress and skips repeated deck IDs', async ({ page }) => {
+  await openStudy(page);
+  await card(page).click();
+  await page.locator('#correct').click();
+  await expect(prompt(page)).toHaveText('beta');
+
+  const file = {
+    name: 'add-decks.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ version: 11, decks: [
+      { id: 'one', name: 'Same ID', category: 'Synthetic', correct: 0, attempts: 0, cards: [] },
+      { id: 'extra', name: 'Extra practice', category: 'Synthetic', correct: 0, attempts: 0,
+        cards: [{ id: 'exercise', fr: 'Give the first person of être', en: 'Je suis', kind: 'conjugation' }] }
+    ] }))
+  };
+  const choose = async () => {
+    await page.locator('#account-settings summary').click();
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Add decks from file' }).click();
+    await (await chooser).setFiles(file);
+  };
+  await choose();
+  const preview = page.getByRole('dialog', { name: 'Add decks' });
+  await expect(preview).toContainText('1 deck to add with 1 card. Skipping 1 deck already in your library.');
+  await preview.getByRole('button', { name: 'Add decks', exact: true }).click();
+  await expect(page.locator('#notice')).toHaveText('Added 1 deck to your library.');
+  await expect(prompt(page)).toHaveText('beta');
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+  await choose();
+  await expect(page.locator('#notice')).toHaveText('This file has no new decks.');
+  if (await page.locator('#show-decks').isVisible()) await page.getByRole('button', { name: 'Browse decks' }).click();
+  await expect(page.locator('[data-deck="one"]')).toContainText('100%');
+  await expect(page.getByRole('button', { name: /^Same ID/ })).toHaveCount(0);
+  await page.getByRole('button', { name: /^Extra practice/ }).click();
+  await expect(prompt(page)).toHaveText('Give the first person of être');
+  await card(page).click();
+  await expect(prompt(page)).toHaveText('Je suis');
+});
+
 test('a delayed answer never grades or advances the newly selected round', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'The desktop sidebar stays available during a save');
   await openStudy(page);

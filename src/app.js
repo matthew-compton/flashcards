@@ -599,6 +599,7 @@ function showMessage(title, detail, button, action) {
 function render() {
   cancelCardGesture();
   refreshFlagCount();
+  $("append-decks").disabled = !studyStore?.generation;
   const groups = categories();
   renderLibrary(groups);
   $("today").hidden = $("mobile-home-brand").hidden = !showingToday;
@@ -883,6 +884,86 @@ $("export").onclick = () => {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
+
+const appendDialog = $("append-decks-dialog");
+const appendConfirm = $("confirm-append-decks");
+const appendCancel = $("close-append-decks");
+let appendPreview;
+
+function newDecks(decks, library) {
+  const existing = new Set(library.decks.map(deck => deck.id));
+  return decks.filter(deck => !existing.has(deck.id));
+}
+
+function deckCount(count) {
+  return count + (count === 1 ? " deck" : " decks");
+}
+
+$("append-decks").onclick = () => $("append-decks-file").click();
+$("append-decks-file").onchange = async event => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  const store = studyStore;
+  const generation = store?.generation;
+  if (!file || !generation) return;
+  let decks;
+  try {
+    decks = prepareLibrary(JSON.parse(await file.text())).decks;
+  } catch {
+    notice("That file is not a valid Flashcards backup.");
+    return;
+  }
+  if (studyStore !== store || store.generation !== generation) return;
+  $("account-settings").open = false;
+  const pending = newDecks(decks, store.library);
+  if (!pending.length) {
+    notice("This file has no new decks.");
+    return;
+  }
+  appendPreview = { store, generation, decks };
+  const cards = pending.reduce((count, deck) => count + deck.cards.length, 0);
+  const skipped = decks.length - pending.length;
+  $("append-decks-summary").textContent =
+    deckCount(pending.length) + " to add with " + cards + (cards === 1 ? " card." : " cards.") +
+    (skipped ? " Skipping " + deckCount(skipped) + " already in your library." : "");
+  $("append-decks-list").replaceChildren(...pending.map(deck => make("li", "", deck.name)));
+  $("append-decks-error").hidden = true;
+  appendConfirm.disabled = appendCancel.disabled = false;
+  notice("");
+  appendDialog.showModal();
+};
+appendCancel.onclick = () => appendDialog.close();
+appendDialog.addEventListener("cancel", event => { if (appendCancel.disabled) event.preventDefault(); });
+appendDialog.addEventListener("close", () => { appendPreview = undefined; });
+appendConfirm.onclick = async () => {
+  const preview = appendPreview;
+  if (!preview) return;
+  const { store, generation, decks } = preview;
+  appendConfirm.disabled = appendCancel.disabled = true;
+  try {
+    const pending = newDecks(decks, store.library);
+    if (pending.length) {
+      await store.commit(pending.map(deck => ({ type: "deck.add", payload: { deck } })), { generation });
+    }
+    if (studyStore !== store || appendPreview !== preview) return;
+    appendDialog.close();
+    render();
+    if (!pending.length) { notice("This file has no new decks."); return; }
+    await store.sync();
+    if (studyStore === store) {
+      notice(store.generation !== generation ? "Your library changed while syncing. Check your decks and try again." :
+        "Added " + deckCount(pending.length) +
+          (store.status === "Synced" ? " to your library." : " on this device. They’ll sync when the connection is available."));
+    }
+  } catch (error) {
+    if (appendPreview !== preview) return;
+    const message = $("append-decks-error");
+    message.textContent = error.message;
+    message.hidden = false;
+    appendConfirm.disabled = appendCancel.disabled = false;
+  }
+};
+
 $("import").onclick = () => $("backup-file").click();
 $("backup-file").onchange = async event => {
   const file = event.target.files[0];
