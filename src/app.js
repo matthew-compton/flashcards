@@ -7,6 +7,7 @@ import { cardText, firstSide, isDue, isExercise, practiceDirection, reviewBucket
 "use strict";
 
 const sectionStorageKey = "french-flashcards-library-sections";
+const courseCategoryOrder = new Map([["A1", 0], ["A2", 1], ["B1.1", 2], ["B1.2", 3]]);
 const currentVersion = 11;
 const mixModes = {
   due: { title: "Spaced review", empty: "No cards are due. Try shuffling these sections." },
@@ -255,7 +256,11 @@ function categories() {
     group.attempts += deck.attempts;
     groups.set(deck.category, group);
   }
-  return groups;
+  return new Map([...groups].sort(([left], [right]) => {
+    const leftRank = courseCategoryOrder.get(left) ?? courseCategoryOrder.size;
+    const rightRank = courseCategoryOrder.get(right) ?? courseCategoryOrder.size;
+    return leftRank - rightRank;
+  }));
 }
 
 function make(tag, className, value) {

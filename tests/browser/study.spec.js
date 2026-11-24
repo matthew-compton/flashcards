@@ -77,7 +77,7 @@ test('tap to reveal, grade, undo, and return a skipped card to the end', async (
   }
 });
 
-test('adding decks from a file keeps existing progress and skips repeated deck IDs', async ({ page }) => {
+test('adding decks keeps course sections ordered, preserves progress, and skips repeated IDs', async ({ page }) => {
   await openStudy(page);
   await card(page).click();
   await page.locator('#correct').click();
@@ -89,7 +89,9 @@ test('adding decks from a file keeps existing progress and skips repeated deck I
     buffer: Buffer.from(JSON.stringify({ version: 11, decks: [
       { id: 'one', name: 'Same ID', category: 'Synthetic', correct: 0, attempts: 0, cards: [] },
       { id: 'extra', name: 'Extra practice', category: 'Synthetic', correct: 0, attempts: 0,
-        cards: [{ id: 'exercise', fr: 'Give the first person of être', en: 'Je suis', kind: 'conjugation' }] }
+        cards: [{ id: 'exercise', fr: 'Give the first person of être', en: 'Je suis', kind: 'conjugation' }] },
+      ...['A1', 'A2', 'B1.2', 'B1.1'].map(category =>
+        ({ id: category, name: category + ' practice', category, correct: 0, attempts: 0, cards: [] }))
     ] }))
   };
   const choose = async () => {
@@ -100,9 +102,9 @@ test('adding decks from a file keeps existing progress and skips repeated deck I
   };
   await choose();
   const preview = page.getByRole('dialog', { name: 'Add decks' });
-  await expect(preview).toContainText('1 deck to add with 1 card. Skipping 1 deck already in your library.');
+  await expect(preview).toContainText('5 decks to add with 1 card. Skipping 1 deck already in your library.');
   await preview.getByRole('button', { name: 'Add decks', exact: true }).click();
-  await expect(page.locator('#notice')).toHaveText('Added 1 deck to your library.');
+  await expect(page.locator('#notice')).toHaveText('Added 5 decks to your library.');
   await expect(prompt(page)).toHaveText('beta');
 
   await page.reload();
@@ -110,6 +112,9 @@ test('adding decks from a file keeps existing progress and skips repeated deck I
   await choose();
   await expect(page.locator('#notice')).toHaveText('This file has no new decks.');
   if (await page.locator('#show-decks').isVisible()) await page.getByRole('button', { name: 'Browse decks' }).click();
+  await expect(page.locator('#library [data-category] h3')).toHaveText(['A1', 'A2', 'B1.1', 'B1.2', 'Synthetic', 'Mix practice']);
+  const synthetic = page.locator('#library [data-category="Synthetic"]');
+  if (!await synthetic.evaluate(summary => summary.parentElement.open)) await synthetic.click();
   await expect(page.locator('[data-deck="one"]')).toContainText('100%');
   await expect(page.getByRole('button', { name: /^Same ID/ })).toHaveCount(0);
   await page.getByRole('button', { name: /^Extra practice/ }).click();
