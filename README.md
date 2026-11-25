@@ -22,7 +22,7 @@ Set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in `.env`. Only an anon or pub
 
 - `npm test` runs the domain and storage tests. `npm run test:coverage` reports coverage for modules loaded by that suite.
 - `npm run test:db` applies the production migrations to disposable, embedded Postgres. CI also runs the suite against PostgreSQL 17 with two concurrent connections. For that mode locally, point `FLASHCARDS_TEST_DATABASE_URL` to an empty `flashcards_test` database on localhost.
-- `npx playwright install chromium` followed by `npm run test:browser` runs the real app with synthetic account data. Set `FLASHCARDS_TEST_CHROME` to a local Chrome executable to use it. Install WebKit and set `FLASHCARDS_TEST_WEBKIT=1` to add the iPhone layout tests. Device checks for browser context menus and navigation gestures still need physical phones.
+- `npx playwright install chromium` followed by `npm run test:browser` runs the real app with synthetic account data. Playwright manages the fixture server in its test process, so these tests run in the Windows Codex sandbox. Set `FLASHCARDS_TEST_CHROME` to a local Chrome executable to use it for the Chromium projects. Install WebKit and set `FLASHCARDS_TEST_WEBKIT=1` to add the iPhone layout tests. Device checks for browser context menus and navigation gestures still need physical phones.
 - `npm run bench:replay` measures event replay on a synthetic 44-deck collection. It excludes IndexedDB, networking, and browser rendering.
 
 Pull requests and Pages deployments run the quality workflow. The database and browser tests use isolated fixtures.
@@ -33,7 +33,7 @@ GitHub Pages publishes `.github/workflows/pages.yml` after pushes to `main`. Set
 
 Run `npm run publish:check` to check whether the current command session can push the checked-out commit to `origin/main`. It uses a dry run with credential prompts disabled. A public clone or fetch can succeed even when the session cannot push.
 
-In Windows Codex, use host approval for the publish check and for an authorized push. The host process can use the existing Windows GitHub CLI credential helper. Ordinary development commands can stay in the sandbox. After pushing, check that the Pages workflow deploys the pushed commit.
+The installed Windows release command in `AGENTS.md` uses the existing Windows GitHub CLI credential with a reusable host approval. It verifies that the new commit descends from the current GitHub `main` tip, runs Git's dry run, and binds any push to that exact tip. After pushing, check that the Pages workflow deploys the pushed commit.
 
 In Supabase Authentication URL Configuration, set the Site URL to `https://matthew-compton.github.io/flashcards/` and allow that exact redirect URL. Add `http://127.0.0.1:8797/` when testing locally. Email link sign-in is enabled through Supabase's email provider.
 
